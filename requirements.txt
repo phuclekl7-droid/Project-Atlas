@@ -2,6 +2,7 @@
 # Core
 python-dotenv>=1.0.0
 requests>=2.31.0
+aiohttp>=3.9.0
 
 # Testing
 pytest>=8.0.0
@@ -23,3 +24,4 @@ bandit>=1.7.8
 
 # CI
 types-requests>=2.31.0
+types-aiohttp>=3.9.0

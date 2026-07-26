@@ -2,14 +2,21 @@
 Model Router module: Acts as an interface to communicate with different LLMs (Ollama, OpenAI, Gemini, etc.).
 Supports plug-and-play: changing the provider in Settings is enough to switch.
 Now supports conversation context injection for memory/stateful conversations.
+
+Async support:
+- BaseModel.async_generate() for non-blocking API calls
+- Uses aiohttp instead of requests for async operations
+- MockModel uses asyncio.sleep instead of time.sleep
 """
 
+import asyncio
 import json
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+import aiohttp
 import requests
 
 from src.core import (
@@ -83,19 +90,41 @@ class BaseModel(ABC):
         **kwargs,
     ) -> ModelResponse:
         """
-        Send a prompt (with optional conversation context) to the model.
+        Send a prompt (with optional conversation context) to the model (sync).
 
         Args:
             prompt: The new user input text
             context: Optional list of {"role": str, "content": str} dicts
-                     representing conversation history (oldest first).
-                     Roles are typically "user" or "assistant".
             **kwargs: Additional provider-specific parameters
 
         Returns:
             ModelResponse with the model's output
         """
         ...
+
+    async def async_generate(
+        self,
+        prompt: str,
+        context: Optional[list[dict]] = None,
+        **kwargs,
+    ) -> ModelResponse:
+        """
+        Send a prompt to the model asynchronously (non-blocking).
+
+        Default implementation calls sync generate in a thread pool.
+        Override in subclasses for true async (aiohttp).
+
+        Args:
+            prompt: The new user input text
+            context: Optional conversation history
+            **kwargs: Additional provider-specific parameters
+
+        Returns:
+            ModelResponse with the model's output
+        """
+        return await asyncio.to_thread(
+            self.generate, prompt, context=context, **kwargs
+        )
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(model={self.model_name!r})"
@@ -112,24 +141,11 @@ class MockModel(BaseModel):
     def _get_model_name(self) -> str:
         return "mock-v1"
 
-    def generate(
-        self,
-        prompt: str,
-        context: Optional[list[dict]] = None,
-        **kwargs,
-    ) -> ModelResponse:
+    def _build_response(self, prompt: str, context: Optional[list[dict]] = None) -> ModelResponse:
+        """Build a mock response based on the prompt content."""
         ctx_count = len(context) if context else 0
-        logger.info(
-            f"MockModel received prompt ({len(prompt)} chars, "
-            f"context_messages={ctx_count})"
-        )
-        time.sleep(0.3)  # Simulate latency
-
-        # Build a context-aware response
-        has_context_prefix = "📝 **Context**" if ctx_count > 0 else ""
-
-        # Simulate some basic "intelligence"
         prompt_lower = prompt.lower()
+
         if "hello" in prompt_lower or "hi" in prompt_lower or "xin chào" in prompt_lower:
             response_text = (
                 "👋 Xin chào! Tôi là trợ lý AI cá nhân. "
@@ -147,7 +163,7 @@ class MockModel(BaseModel):
                 "Tôi có thể giúp gì cho bạn? Một số điều tôi có thể làm:\n"
                 "- Trả lời câu hỏi thông qua kết nối tới các mô hình ngôn ngữ\n"
                 "- Ghi nhớ ngữ cảnh hội thoại (đã hoạt động!)\n"
-                "- Chạy các plugin mở rộng (sắp có)\n\n"
+                "- Chạy các plugin mở rộng\n\n"
                 f"ℹ️  Session này đã có {ctx_count} tin nhắn trong lịch sử."
             )
         else:
@@ -161,13 +177,42 @@ class MockModel(BaseModel):
                 f"  2. Hoặc thiết lập API key cho OpenAI/Gemini trong file .env"
             )
 
-        logger.info("MockModel generated response")
         return ModelResponse(
             text=response_text,
             model_name=self.model_name,
             provider=PROVIDER_MOCK,
             latency_ms=300.0,
         )
+
+    def generate(
+        self,
+        prompt: str,
+        context: Optional[list[dict]] = None,
+        **kwargs,
+    ) -> ModelResponse:
+        ctx_count = len(context) if context else 0
+        logger.info(
+            f"MockModel received prompt ({len(prompt)} chars, "
+            f"context_messages={ctx_count})"
+        )
+        time.sleep(0.3)  # Simulate latency
+        logger.info("MockModel generated response")
+        return self._build_response(prompt, context)
+
+    async def async_generate(
+        self,
+        prompt: str,
+        context: Optional[list[dict]] = None,
+        **kwargs,
+    ) -> ModelResponse:
+        ctx_count = len(context) if context else 0
+        logger.info(
+            f"MockModel async received prompt ({len(prompt)} chars, "
+            f"context_messages={ctx_count})"
+        )
+        await asyncio.sleep(0.3)  # Non-blocking delay
+        logger.info("MockModel async generated response")
+        return self._build_response(prompt, context)
 
 
 # ============================================================
@@ -195,6 +240,26 @@ class OllamaModel(BaseModel):
         messages.append({"role": "user", "content": prompt})
         return messages
 
+    def _build_payload(self, prompt: str, context: Optional[list[dict]] = None, **kwargs) -> dict:
+        messages = self._build_messages(prompt, context)
+        return {
+            "model": self.model_name,
+            "messages": messages,
+            "stream": False,
+            **kwargs,
+        }
+
+    def _parse_response(self, data: dict, elapsed: float) -> ModelResponse:
+        text = data.get("message", {}).get("content", "")
+        return ModelResponse(
+            text=text,
+            model_name=self.model_name,
+            provider=PROVIDER_OLLAMA,
+            latency_ms=elapsed,
+            tokens_used=None,
+            raw=data,
+        )
+
     def generate(
         self,
         prompt: str,
@@ -202,19 +267,12 @@ class OllamaModel(BaseModel):
         **kwargs,
     ) -> ModelResponse:
         url = self._build_url("chat")
-        messages = self._build_messages(prompt, context)
-
-        payload = {
-            "model": self.model_name,
-            "messages": messages,
-            "stream": False,
-            **kwargs,
-        }
+        payload = self._build_payload(prompt, context, **kwargs)
 
         ctx_info = f", context_messages={len(context)}" if context else ""
         logger.info(
             f"Ollama: sending request to {url} "
-            f"(model={self.model_name}, messages={len(messages)}{ctx_info})"
+            f"(model={self.model_name}, messages={len(payload['messages'])}{ctx_info})"
         )
 
         try:
@@ -229,31 +287,64 @@ class OllamaModel(BaseModel):
                 )
 
             data = response.json()
-            text = data.get("message", {}).get("content", "")
-
             logger.info(f"Ollama: response received in {elapsed:.0f}ms")
-            return ModelResponse(
-                text=text,
-                model_name=self.model_name,
-                provider=PROVIDER_OLLAMA,
-                latency_ms=elapsed,
-                tokens_used=None,
-                raw=data,
-            )
+            return self._parse_response(data, elapsed)
 
         except requests.ConnectionError as e:
             raise ModelConnectionError(
-                f"Cannot connect to Ollama at {url}. "
-                f"Is Ollama running?",
+                f"Cannot connect to Ollama at {url}. Is Ollama running?",
                 details=str(e),
             )
         except requests.Timeout:
-            raise ModelConnectionError(
-                f"Ollama request timed out after 120s",
-            )
+            raise ModelConnectionError("Ollama request timed out after 120s")
         except Exception as e:
             raise ModelConnectionError(
-                f"Ollama request failed unexpectedly",
+                "Ollama request failed unexpectedly",
+                details=str(e),
+            )
+
+    async def async_generate(
+        self,
+        prompt: str,
+        context: Optional[list[dict]] = None,
+        **kwargs,
+    ) -> ModelResponse:
+        url = self._build_url("chat")
+        payload = self._build_payload(prompt, context, **kwargs)
+
+        ctx_info = f", context_messages={len(context)}" if context else ""
+        logger.info(
+            f"Ollama: async request to {url} "
+            f"(model={self.model_name}, messages={len(payload['messages'])}{ctx_info})"
+        )
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                start = time.time()
+                async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=120)) as response:
+                    elapsed = (time.time() - start) * 1000
+
+                    if response.status != 200:
+                        text = await response.text()
+                        raise ModelConnectionError(
+                            f"Ollama returned HTTP {response.status}",
+                            details=text[:500],
+                        )
+
+                    data = await response.json()
+                    logger.info(f"Ollama: async response received in {elapsed:.0f}ms")
+                    return self._parse_response(data, elapsed)
+
+        except aiohttp.ClientConnectorError as e:
+            raise ModelConnectionError(
+                f"Cannot connect to Ollama at {url}. Is Ollama running?",
+                details=str(e),
+            )
+        except asyncio.TimeoutError:
+            raise ModelConnectionError("Ollama async request timed out after 120s")
+        except Exception as e:
+            raise ModelConnectionError(
+                "Ollama async request failed unexpectedly",
                 details=str(e),
             )
 
@@ -279,33 +370,50 @@ class OpenAIModel(BaseModel):
         messages.append({"role": "user", "content": prompt})
         return messages
 
+    def _build_headers(self) -> dict:
+        api_key = self.settings.openai_api_key
+        if not api_key:
+            raise ConfigurationError("OpenAI API key is not configured")
+        return {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+
+    def _build_payload(self, prompt: str, context: Optional[list[dict]] = None, **kwargs) -> dict:
+        messages = self._build_messages(prompt, context)
+        return {
+            "model": self.model_name,
+            "messages": messages,
+            **kwargs,
+        }
+
+    def _parse_response(self, data: dict, elapsed: float) -> ModelResponse:
+        choice = data.get("choices", [{}])[0]
+        text = choice.get("message", {}).get("content", "")
+        usage = data.get("usage", {})
+        return ModelResponse(
+            text=text,
+            model_name=self.model_name,
+            provider=PROVIDER_OPENAI,
+            latency_ms=elapsed,
+            tokens_used=usage.get("total_tokens"),
+            raw=data,
+        )
+
     def generate(
         self,
         prompt: str,
         context: Optional[list[dict]] = None,
         **kwargs,
     ) -> ModelResponse:
-        api_key = self.settings.openai_api_key
-        if not api_key:
-            raise ConfigurationError("OpenAI API key is not configured")
-
         url = "https://api.openai.com/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-        messages = self._build_messages(prompt, context)
-
-        payload = {
-            "model": self.model_name,
-            "messages": messages,
-            **kwargs,
-        }
+        headers = self._build_headers()
+        payload = self._build_payload(prompt, context, **kwargs)
 
         ctx_info = f", context_messages={len(context)}" if context else ""
         logger.info(
             f"OpenAI: sending request "
-            f"(model={self.model_name}, messages={len(messages)}{ctx_info})"
+            f"(model={self.model_name}, messages={len(payload['messages'])}{ctx_info})"
         )
 
         try:
@@ -320,32 +428,59 @@ class OpenAIModel(BaseModel):
                 )
 
             data = response.json()
-            choice = data.get("choices", [{}])[0]
-            text = choice.get("message", {}).get("content", "")
-            usage = data.get("usage", {})
-
             logger.info(f"OpenAI: response received in {elapsed:.0f}ms")
-            return ModelResponse(
-                text=text,
-                model_name=self.model_name,
-                provider=PROVIDER_OPENAI,
-                latency_ms=elapsed,
-                tokens_used=usage.get("total_tokens"),
-                raw=data,
-            )
+            return self._parse_response(data, elapsed)
 
         except requests.ConnectionError as e:
-            raise ModelConnectionError(
-                f"Cannot connect to OpenAI API",
-                details=str(e),
-            )
+            raise ModelConnectionError("Cannot connect to OpenAI API", details=str(e))
         except requests.Timeout:
-            raise ModelConnectionError(
-                f"OpenAI request timed out after 60s",
-            )
+            raise ModelConnectionError("OpenAI request timed out after 60s")
         except Exception as e:
             raise ModelConnectionError(
-                f"OpenAI request failed unexpectedly",
+                "OpenAI request failed unexpectedly",
+                details=str(e),
+            )
+
+    async def async_generate(
+        self,
+        prompt: str,
+        context: Optional[list[dict]] = None,
+        **kwargs,
+    ) -> ModelResponse:
+        url = "https://api.openai.com/v1/chat/completions"
+        headers = self._build_headers()
+        payload = self._build_payload(prompt, context, **kwargs)
+
+        ctx_info = f", context_messages={len(context)}" if context else ""
+        logger.info(
+            f"OpenAI: async request "
+            f"(model={self.model_name}, messages={len(payload['messages'])}{ctx_info})"
+        )
+
+        try:
+            async with aiohttp.ClientSession(headers=headers) as session:
+                start = time.time()
+                async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=60)) as response:
+                    elapsed = (time.time() - start) * 1000
+
+                    if response.status != 200:
+                        text = await response.text()
+                        raise ModelConnectionError(
+                            f"OpenAI returned HTTP {response.status}",
+                            details=text[:500],
+                        )
+
+                    data = await response.json()
+                    logger.info(f"OpenAI: async response received in {elapsed:.0f}ms")
+                    return self._parse_response(data, elapsed)
+
+        except aiohttp.ClientConnectorError as e:
+            raise ModelConnectionError("Cannot connect to OpenAI API", details=str(e))
+        except asyncio.TimeoutError:
+            raise ModelConnectionError("OpenAI async request timed out after 60s")
+        except Exception as e:
+            raise ModelConnectionError(
+                "OpenAI async request failed unexpectedly",
                 details=str(e),
             )
 
@@ -359,13 +494,13 @@ class ModelRouter:
     """
     Routes prompts to the appropriate model provider based on settings.
 
-    Supports conversation context via the `context` parameter
-    and optional caching of model responses.
+    Supports conversation context via the `context` parameter,
+    optional caching, and async generation.
 
     Usage:
         router = ModelRouter(settings)
         response = router.generate("Hello!")
-        response2 = router.generate("What did I say?", context=history)
+        response = await router.generate_async("Hello!")
     """
 
     _PROVIDER_MAP = {
@@ -413,11 +548,11 @@ class ModelRouter:
         **kwargs,
     ) -> ModelResponse:
         """
-        Send a prompt to the configured model and return the response.
+        Send a prompt to the configured model (sync).
 
         Args:
             prompt: The input text
-            context: Optional list of {"role": str, "content": str} dicts
+            context: Optional conversation history
             use_cache: Whether to check and store in response cache
             **kwargs: Additional parameters passed to the underlying model
 
@@ -427,7 +562,7 @@ class ModelRouter:
         if not prompt or not prompt.strip():
             raise AssistantError("Prompt cannot be empty")
 
-        # Check cache first (skip for Mock to always get fresh responses)
+        # Check cache first (skip for Mock)
         if use_cache and self.settings.model_provider != PROVIDER_MOCK:
             cache_key = make_model_cache_key(prompt, context, self.model.model_name)
             cached = self._cache.get(cache_key)
@@ -435,10 +570,53 @@ class ModelRouter:
                 logger.debug("Model response cache HIT")
                 return cached
 
-        # Cache miss — call the actual model
         ctx_info = f", context={len(context)} messages" if context else ""
         logger.debug(f"Routing prompt ({len(prompt)} chars{ctx_info}) to {self.model}")
         response = self.model.generate(prompt, context=context, **kwargs)
+
+        # Store in cache (skip Mock)
+        if use_cache and self.settings.model_provider != PROVIDER_MOCK:
+            cache_key = make_model_cache_key(prompt, context, self.model.model_name)
+            self._cache.set(cache_key, response)
+
+        return response
+
+    async def generate_async(
+        self,
+        prompt: str,
+        context: Optional[list[dict]] = None,
+        use_cache: bool = True,
+        **kwargs,
+    ) -> ModelResponse:
+        """
+        Send a prompt to the configured model asynchronously (non-blocking).
+
+        Uses aiohttp for Ollama/OpenAI, asyncio.sleep for Mock.
+        Falls back to thread pool if the model doesn't have true async support.
+
+        Args:
+            prompt: The input text
+            context: Optional conversation history
+            use_cache: Whether to check and store in response cache
+            **kwargs: Additional parameters passed to the underlying model
+
+        Returns:
+            ModelResponse with the generated text
+        """
+        if not prompt or not prompt.strip():
+            raise AssistantError("Prompt cannot be empty")
+
+        # Check cache first (skip for Mock)
+        if use_cache and self.settings.model_provider != PROVIDER_MOCK:
+            cache_key = make_model_cache_key(prompt, context, self.model.model_name)
+            cached = self._cache.get(cache_key)
+            if cached is not None:
+                logger.debug("Model response cache HIT (async)")
+                return cached
+
+        ctx_info = f", context={len(context)} messages" if context else ""
+        logger.debug(f"Routing async prompt ({len(prompt)} chars{ctx_info}) to {self.model}")
+        response = await self.model.async_generate(prompt, context=context, **kwargs)
 
         # Store in cache (skip Mock)
         if use_cache and self.settings.model_provider != PROVIDER_MOCK:

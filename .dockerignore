@@ -1,0 +1,74 @@
+# ═══════════════════════════════════════════════════════════
+# Project Atlas — .dockerignore
+# ═══════════════════════════════════════════════════════════
+# Exclude these files/directories from Docker build context
+# to speed up builds and keep images small.
+# ═══════════════════════════════════════════════════════════
+
+# ── Environment ──
+.env
+.env.local
+.env.docker
+
+# ── Data (mounted as volume at runtime) ──
+data/
+
+# ── Git ──
+.git
+.gitignore
+.gitattributes
+.github/
+
+# ── Python ──
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# ── IDE ──
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── Testing ──
+.pytest_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+*.cover
+
+# ── Pre-commit ──
+.pre-commit-config.yaml
+.pre-commit-config.yaml.bak
+
+# ── OS files ──
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log
+
+# ── Documentation (not needed at runtime) ──
+docs/
+CHANGELOG.md
+STATE.json
+PROJECT_MEMORY.md
+ROADMAP.md
+ARCHITECTURE.md
+NEXT_AI.md
+
+# ── Docker ──
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# ── Project specific ──
+config.json
+local/
+temp/
+tests/

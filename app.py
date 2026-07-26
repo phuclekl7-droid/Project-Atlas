@@ -7,6 +7,7 @@ Built with Streamlit, integrates Core → Settings → Memory → Model Router.
 Run with: streamlit run app.py
 """
 
+import asyncio
 import time
 from pathlib import Path
 
@@ -379,8 +380,7 @@ def switch_provider(provider: str):
 
 def generate_response(prompt: str):
     """
-    Core generation logic — uses Workflow to orchestrate
-    Memory → Plugin → Model Router → Memory.
+    Core generation logic (sync) — uses Workflow.process().
     Called inside st.spinner() for visual feedback.
     """
     workflow = st.session_state.workflow
@@ -393,6 +393,49 @@ def generate_response(prompt: str):
             user_input=prompt,
             session_id=session_id,
             max_context=settings.max_context_messages,
+        )
+
+        # Refresh messages to show new conversation
+        refresh_messages()
+
+        # Store display info
+        if result.source == "plugin":
+            st.session_state.latency = result.latency_ms
+            if result.plugin_result and result.plugin_result.success:
+                st.session_state.success = f"🧩 Plugin: {result.plugin_result.output}"
+        else:
+            st.session_state.latency = result.latency_ms
+
+    except ConfigurationError as e:
+        st.session_state.error = f"Cấu hình lỗi: {e.message}"
+    except ModelConnectionError as e:
+        st.session_state.error = f"Kết nối lỗi: {e.message}"
+    except AssistantError as e:
+        st.session_state.error = f"Lỗi: {e.message}"
+    except Exception as e:
+        st.session_state.error = f"Lỗi bất ngờ: {e}"
+
+
+def generate_response_async(prompt: str):
+    """
+    Core generation logic (async / non-blocking) — uses Workflow.process_async().
+    Called inside st.spinner() for visual feedback.
+
+    Uses asyncio.run() to bridge the sync Streamlit world with the async Workflow.
+    The API call (aiohttp) runs in the background without blocking the UI thread.
+    """
+    workflow = st.session_state.workflow
+    session_id = st.session_state.session_id
+    settings = st.session_state.settings
+
+    try:
+        # Execute full workflow asynchronously
+        result = asyncio.run(
+            workflow.process_async(
+                user_input=prompt,
+                session_id=session_id,
+                max_context=settings.max_context_messages,
+            )
         )
 
         # Refresh messages to show new conversation
@@ -873,8 +916,8 @@ def render_chat():
     # ── Handle pending prompt (generation on the second render) ──
     if st.session_state.get("pending_prompt"):
         prompt = st.session_state.pop("pending_prompt")
-        with st.spinner("🤔 Đang suy nghĩ..."):
-            generate_response(prompt)
+        with st.spinner("🤔 Đang suy nghĩ... [async]"):
+            generate_response_async(prompt)
         st.rerun()
 
     # ── Input area ──

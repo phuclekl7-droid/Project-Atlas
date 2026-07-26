@@ -1,0 +1,99 @@
+name: 🐳 Docker — Build & Push
+
+on:
+  push:
+    tags:
+      - "v*"  # e.g., v0.5.0, v0.5.1-alpha, v0.6.0
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write  # Needed for GitHub Container Registry (ghcr.io)
+
+env:
+  IMAGE_NAME: project-atlas
+  REGISTRY_GHCR: ghcr.io
+  REGISTRY_DOCKER: index.docker.io
+
+jobs:
+  test:
+    name: 🔍 Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - run: python -m pytest tests/ -v --tb=short
+      - run: python -c "import src.core; import src.settings; import src.model_router; import src.memory; import src.plugin; import src.workflow; import src.knowledge; print('✅ All modules OK')"
+
+  build-and-push:
+    name: 🐳 Build & Push Docker Image
+    needs: [test]  # Only build if tests pass
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── Checkout ──
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Docker metadata ──
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}
+            ${{ env.REGISTRY_GHCR }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+          flavor: |
+            latest=true
+
+      # ── Set up Docker Buildx ──
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # ── Log in to Docker Hub ──
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+        continue-on-error: true  # Don't fail if Docker Hub creds not configured
+
+      # ── Log in to GitHub Container Registry ──
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY_GHCR }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── Build & Push ──
+      - name: Build and push Docker image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ── Verify ──
+      - name: Image digest
+        run: |
+          echo "✅ Docker image built and pushed!"
+          echo "Tags: ${{ steps.meta.outputs.tags }}"
+          echo "Digest: ${{ steps.build.outputs.digest }}"

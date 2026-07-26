@@ -1,0 +1,71 @@
+# ═══════════════════════════════════════════════════════════
+# Project Atlas — Docker Compose
+# ═══════════════════════════════════════════════════════════
+# Deploy with persistent data storage.
+#
+# Usage:
+#   # Copy env and customize
+#   cp .env.docker .env
+#   # Edit .env with your API keys
+#
+#   # Start in background
+#   docker compose up -d
+#
+#   # View logs
+#   docker compose logs -f
+#
+#   # Stop
+#   docker compose down
+#
+#   # Stop + delete volumes (WARNING: deletes all data!)
+#   docker compose down -v
+# ═══════════════════════════════════════════════════════════
+
+services:
+  atlas:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: project-atlas
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    volumes:
+      # ── Persistent data volumes ──
+      # Memory database (SQLite) + Knowledge base (ChromaDB) files
+      - atlas_data:/app/data
+      # ── Optional: mount local .env ──
+      # - ./path/to/.env:/app/.env:ro
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Override defaults if needed
+      - MODEL_PROVIDER=${MODEL_PROVIDER:-mock}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - MAX_CONTEXT_MESSAGES=${MAX_CONTEXT_MESSAGES:-10}
+      # Memory path (inside container)
+      - MEMORY_PATH=/app/data/memory.db
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    # ── Resource limits (optional) ──
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: "1.0"
+    #       memory: "512M"
+
+volumes:
+  atlas_data:
+    name: project-atlas-data
+    # ── For VPS: bind mount to host directory ──
+    # driver: local
+    # driver_opts:
+    #   type: none
+    #   device: /path/to/host/data
+    #   o: bind

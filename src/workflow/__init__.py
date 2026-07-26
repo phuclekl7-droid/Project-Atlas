@@ -155,7 +155,7 @@ class Workflow:
         max_context: Optional[int] = None,
     ) -> WorkflowResult:
         """
-        Execute one full workflow cycle.
+        Execute one full workflow cycle (synchronous).
 
         Flow:
           1. Save user message to Memory
@@ -210,6 +210,84 @@ class Workflow:
 
         # Step 4: Call Model Router
         response = self._call_model(user_input, context)
+
+        # Step 5: Save assistant response
+        self.memory.add_message(session_id, "assistant", response.text)
+
+        elapsed = (time.time() - start_time) * 1000
+        self.total_llm_calls += 1
+
+        return WorkflowResult(
+            input=user_input,
+            response=response,
+            context_used=len(context),
+            latency_ms=elapsed,
+            source="llm",
+            session_id=session_id,
+        )
+
+    async def process_async(
+        self,
+        user_input: str,
+        session_id: str,
+        max_context: Optional[int] = None,
+    ) -> WorkflowResult:
+        """
+        Execute one full workflow cycle (asynchronous / non-blocking).
+
+        Flow is identical to process() but uses async model calls:
+          1. Save user message to Memory
+          2. Load context from Memory
+          3. Try to execute a matching Plugin
+          4. If no plugin matched, call Model Router with context (async)
+          5. Save assistant response to Memory
+          6. Return WorkflowResult
+
+        Args:
+            user_input: The user's message text
+            session_id: Active session ID
+            max_context: Override default max_context_messages
+
+        Returns:
+            WorkflowResult with response or plugin result
+        """
+        start_time = time.time()
+
+        if not user_input or not user_input.strip():
+            raise AssistantError("User input cannot be empty")
+
+        max_ctx = max_context or self.max_context_messages
+        self.total_processed += 1
+
+        # Step 1: Save user message
+        self.memory.add_message(session_id, "user", user_input)
+
+        # Step 2: Load context
+        context = self.memory.get_context(session_id, limit=max_ctx)
+        logger.debug(f"Loaded {len(context)} context messages for session {session_id}")
+
+        # Step 3: Check plugins (sync — fast local operation)
+        if self.plugin_loader:
+            plugin_result = self._try_plugin(user_input)
+            if plugin_result is not None:
+                elapsed = (time.time() - start_time) * 1000
+                self.total_plugin_calls += 1
+
+                # Save plugin output as assistant message
+                if plugin_result.success:
+                    self.memory.add_message(session_id, "assistant", plugin_result.output)
+
+                return WorkflowResult(
+                    input=user_input,
+                    plugin_result=plugin_result,
+                    context_used=len(context),
+                    latency_ms=elapsed,
+                    source="plugin",
+                    session_id=session_id,
+                )
+
+        # Step 4: Call Model Router (async — non-blocking API call!)
+        response = await self._call_model_async(user_input, context)
 
         # Step 5: Save assistant response
         self.memory.add_message(session_id, "assistant", response.text)
@@ -309,16 +387,90 @@ class Workflow:
             logger.warning(f"Knowledge enrichment failed: {e}")
             return prompt
 
+    # ── Web Search Enrichment ──
+
+    def _enrich_with_web_search(self, prompt: str) -> str:
+        """Auto-detect questions and inject web search results into the prompt.
+
+        If the prompt looks like a question (contains ? or starts with question words)
+        and the web_search plugin is available, automatically search and inject results.
+        """
+        if not self.plugin_loader:
+            return prompt
+
+        web_search = self.plugin_loader.get("web_search")
+        if web_search is None:
+            return prompt
+
+        # Only trigger for question-like prompts (not simple commands)
+        prompt_lower = prompt.strip().lower()
+        is_question = (
+            "?" in prompt
+            or prompt_lower.startswith(("what", "why", "how", "who", "where", "when", "which", "can", "is", "are", "do", "does", "has", "have", "tell", "explain", "define"))
+            or any(w in prompt_lower for w in ["what is", "what are", "how to", "how do", "meaning of"])
+        )
+
+        # Skip very short prompts (commands, greetings)
+        is_greeting = len(prompt.strip().split()) <= 3 and not is_question
+
+        if not is_question or is_greeting:
+            return prompt
+
+        # Execute web search
+        try:
+            result = web_search.execute(prompt)
+            if result.success and result.data:
+                # Format as markdown block
+                web_lines = ["### 🌐 Kết quả tìm kiếm web:\n"]
+                for i, r in enumerate(result.data[:3], 1):
+                    title = r.get("title", "")
+                    snippet = r.get("snippet", "")[:200]
+                    url = r.get("url", "")
+                    web_lines.append(f"{i}. **{title}**")
+                    if snippet:
+                        web_lines.append(f"   > {snippet}")
+                    if url:
+                        web_lines.append(f"   🔗 {url}")
+                    web_lines.append("")
+
+                web_block = "\n".join(web_lines)
+                enriched = (
+                    f"{prompt}\n\n"
+                    f"{web_block}"
+                )
+                logger.debug("Enriched prompt with web search results")
+                return enriched
+
+        except Exception as e:
+            logger.debug(f"Web search enrichment failed: {e}")
+
+        return prompt
+
     # ── Model Router Call ──
 
     def _call_model(self, prompt: str, context: list[dict]) -> ModelResponse:
-        """Send prompt + context to the model router, enriched with knowledge if available."""
-        enriched_prompt = self._enrich_with_knowledge(prompt)
+        """Send prompt + context to the model router, enriched with knowledge and web search if available."""
+        # Enrich with knowledge base first
+        enriched = self._enrich_with_knowledge(prompt)
+        # Then enrich with web search (if applicable)
+        enriched = self._enrich_with_web_search(enriched)
         logger.debug(
             f"Calling model router with {len(context)} context messages"
-            f"{" (enriched with knowledge)" if enriched_prompt != prompt else ""}"
+            f"{" (enriched)" if enriched != prompt else ""}"
         )
-        return self.model_router.generate(enriched_prompt, context=context)
+        return self.model_router.generate(enriched, context=context)
+
+    async def _call_model_async(self, prompt: str, context: list[dict]) -> ModelResponse:
+        """Async version of _call_model — uses generate_async for non-blocking API calls."""
+        # Enrich with knowledge base first
+        enriched = self._enrich_with_knowledge(prompt)
+        # Then enrich with web search (if applicable)
+        enriched = self._enrich_with_web_search(enriched)
+        logger.debug(
+            f"Calling model router (async) with {len(context)} context messages"
+            f"{" (enriched)" if enriched != prompt else ""}"
+        )
+        return await self.model_router.generate_async(enriched, context=context)
 
     # ── Reporting ──
 
