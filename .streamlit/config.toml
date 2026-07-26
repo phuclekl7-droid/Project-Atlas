@@ -1,0 +1,25 @@
+[server]
+# Streamlit Cloud handles port binding automatically
+# This is just for local development
+maxUploadSize = 10
+
+[browser]
+# Open browser automatically (only applies locally)
+gatherUsageStats = false
+
+[theme]
+# Dark theme matching the app's custom CSS
+base = "dark"
+primaryColor = "#667eea"
+backgroundColor = "#1a1a2e"
+secondaryBackgroundColor = "#2d2d3f"
+textColor = "#e0e0e0"
+font = "sans serif"
+
+[runner]
+# Magic comments disabled to avoid conflicts with custom CSS
+magicEnabled = false
+
+[client]
+# Show error details in browser (useful for debugging on Cloud)
+showErrorDetails = true

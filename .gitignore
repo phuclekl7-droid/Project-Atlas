@@ -1,0 +1,68 @@
+# Personal AI Assistant - .gitignore
+
+# ── Environment ──
+.env
+.env.local
+venv/
+.venv/
+env/
+*.pyc
+*.pyo
+*.pyd
+
+# ── Data ──
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# ── IDE ──
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ── Python build ──
+__pycache__/
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ── Testing ──
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.*
+*.cover
+.coverage_data/
+coverage.xml
+
+# ── Pre-commit ──
+.pre-commit-config.yaml.bak
+
+# ── Mypy ──
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# ── Streamlit ──
+.streamlit/secrets.toml
+.streamlit/*.local.toml
+
+# ── OS ──
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log
+
+# ── Project specific ──
+config.json
+local/
+temp/
