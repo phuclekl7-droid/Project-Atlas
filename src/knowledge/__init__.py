@@ -437,6 +437,10 @@ class SimpleKnowledgeBase:
         return True
 
     def add_text(self, filename: str, text: str) -> Optional[str]:
+        if not text.strip():
+            logger.warning(f"Empty text for {filename}, skipping")
+            return None
+
         doc_id = hashlib.sha256(f"{filename}:{text[:100]}".encode()).hexdigest()[:16]
 
         if doc_id in self._docs:

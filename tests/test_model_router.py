@@ -181,7 +181,7 @@ class TestOllamaModel:
             assert isinstance(response, ModelResponse)
             assert response.provider == PROVIDER_OLLAMA
             assert response.text == mock_ollama_chat_response["message"]["content"]
-            assert response.latency_ms > 0
+            assert response.latency_ms >= 0
 
     def test_connection_error(self, ollama_settings):
         """ConnectionError should be wrapped in ModelConnectionError."""

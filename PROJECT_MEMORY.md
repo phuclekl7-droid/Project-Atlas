@@ -40,3 +40,45 @@
 - **Quyết định:** Đặt tên chính thức cho dự án là **"Project Atlas"**.
 - **Lý do:** Người dùng yêu cầu đổi tên để cá nhân hóa hệ thống.
 - **Tình trạng:** Chấp nhận.
+
+**ADR 005: Web UI với Streamlit**
+- **Quyết định:** Dùng Streamlit thay vì Flask/FastAPI + JS.
+- **Lý do:** Streamlit cho phép tạo UI chat nhanh chỉ với Python, không cần frontend riêng.
+- **Tình trạng:** Đã triển khai — `app.py` là entry point chính.
+
+**ADR 006: SQLite cho Memory + Thread Safety**
+- **Quyết định:** Dùng SQLite (built-in) với `check_same_thread=False` cho Cloud.
+- **Lý do:** Zero dependency, đủ cho personal use, ephemeral trên Cloud.
+- **Lưu ý:** Streamlit Cloud chạy multi-thread, cần `check_same_thread=False` trong `sqlite3.connect()`.
+- **Tình trạng:** Đã fix threading issue — src/memory/__init__.py.
+
+**ADR 007: RAG Knowledge với ChromaDB + Fallback**
+- **Quyết định:** Dùng ChromaDB vector search khi có, fallback SimpleKnowledgeBase (keyword).
+- **Lý do:** ChromaDB nhẹ, easy setup. Keyword fallback không cần dependency.
+- **Tình trạng:** Đã triển khai — src/knowledge/__init__.py.
+
+**ADR 008: Plugin System Auto-Discovery**
+- **Quyết định:** Dùng `importlib` + `pkgutil` để auto-discover plugins, không cần registry.
+- **Lý do:** Zero config — tạo file trong `src/plugins/` là plugin tự động load.
+- **Tình trạng:** Đã triển khai — src/plugin/ + src/plugins/calculator.py.
+
+**ADR 009: Workflow Orchestrator**
+- **Quyết định:** Workflow class điều phối Memory → Plugin → Model Router → Memory.
+- **Lý do:** Tập trung logic xử lý, dễ mở rộng (thêm knowledge enrichment).
+- **Tình trạng:** Đã triển khai — src/workflow/__init__.py.
+
+**ADR 010: Deployment — Streamlit Cloud**
+- **Quyết định:** Deploy free trên Streamlit Community Cloud.
+- **Lý do:** Free hosting, auto-deploy từ GitHub, tích hợp secrets.
+- **Hạn chế:** Ephemeral storage (SQLite + ChromaDB reset ~24h), không chạy Ollama.
+- **Tình trạng:** Đã deploy tại https://phuclekl7-droid-project-atlas.streamlit.app
+
+**ADR 011: GitHub Community Setup**
+- **Quyết định:** GitHub Issues + Discussions + Project Board + Actions.
+- **Lý do:** Tích hợp sẵn với GitHub, workflow automation.
+- **Tình trạng:** Issue/PR templates + CONTRIBUTING.md + CODE_OF_CONDUCT.md + SECURITY.md + Wiki docs (5 pages) đã setup.
+
+**ADR 012: Knowledge Injection vào LLM**
+- **Quyết định:** Workflow tự động search KB và enrich prompt, không dùng agent loop.
+- **Lý do:** Đơn giản, hiệu quả, không over-engineering.
+- **Tình trạng:** Đã triển khai trong `Workflow._enrich_with_knowledge()`.

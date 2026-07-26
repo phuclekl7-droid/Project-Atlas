@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 📖 Documentation
+    url: https://github.com/phuclekl7-droid/Project-Atlas#readme
+    about: Xem tài liệu hướng dẫn trước khi tạo issue
+  - name: ❓ FAQ
+    url: https://github.com/phuclekl7-droid/Project-Atlas/blob/main/docs/05-faq.md
+    about: Xem các câu hỏi thường gặp
+  - name: 💬 Discussions
+    url: https://github.com/phuclekl7-droid/Project-Atlas/discussions
+    about: Đặt câu hỏi và thảo luận với cộng đồng

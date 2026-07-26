@@ -134,9 +134,16 @@ class Memory:
 
     @property
     def connection(self) -> sqlite3.Connection:
-        """Lazy-initialized database connection."""
+        """Lazy-initialized database connection.
+
+        Uses check_same_thread=False to support Streamlit Cloud,
+        which may rerun the app on a different thread.
+        """
         if self._connection is None:
-            self._connection = sqlite3.connect(self.db_path)
+            self._connection = sqlite3.connect(
+                self.db_path,
+                check_same_thread=False,
+            )
             self._connection.row_factory = sqlite3.Row
             self._connection.execute("PRAGMA journal_mode=WAL")
             self._connection.execute("PRAGMA foreign_keys=ON")
@@ -209,7 +216,7 @@ class Memory:
         """List recent sessions, newest first."""
         rows = self.connection.execute(
             "SELECT id, name, created_at, updated_at, message_count "
-            "FROM sessions ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+            "FROM sessions ORDER BY updated_at DESC, rowid DESC LIMIT ? OFFSET ?",
             (limit, offset),
         ).fetchall()
         return [Session(**dict(r)) for r in rows]
@@ -322,7 +329,16 @@ class Memory:
         Returns:
             List of {"role": str, "content": str} dicts
         """
-        messages = self.get_messages(session_id, limit=limit)
+        # Get the N most recent messages but return them in chronological order
+        rows = self.connection.execute(
+            "SELECT * FROM ("
+            "  SELECT id, session_id, role, content, created_at, tokens "
+            "  FROM messages WHERE session_id = ? "
+            "  ORDER BY id DESC LIMIT ?"
+            ") ORDER BY id ASC",
+            (session_id, limit),
+        ).fetchall()
+        messages = [Message(**dict(r)) for r in rows]
         return [m.to_context_dict() for m in messages]
 
     def get_context_text(

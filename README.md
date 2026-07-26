@@ -92,20 +92,83 @@ git push -u origin main
 Sau deploy, app sẽ live tại:
 **https://phuclekl7-droid-project-atlas.streamlit.app**
 
-### Bước 4: Cấu hình Secrets (tùy chọn)
+### Bước 4: ⚡ Cấu hình OpenAI để app trả lời thông minh
 
-Sau khi deploy, vào **Settings → Secrets** và thêm:
+Sau khi deploy, app mặc định dùng **Mock** (trả lời giả lập). Để có câu trả lời thực từ AI:
+
+**a) Thêm API Key vào Streamlit Cloud Secrets:**
+
+1. Vào https://share.streamlit.io
+2. Chọn app **Project-Atlas**
+3. Vào **☰ → Settings → Secrets**
+4. Paste vào ô text:
+```toml
+# PROJECT_ATLAS Secrets — 18/09/2024
+
+# Chọn provider mặc định (openai | mock)
+MODEL_PROVIDER = "openai"
+
+# 👇 OpenAI API key — lấy từ https://platform.openai.com/api-keys
+OPENAI_API_KEY = "sk-proj-...cua_ban_o_day..."
+
+# Model (optional, mặc định gpt-4o-mini — rẻ và nhanh)
+# OPENAI_MODEL = "gpt-4o-mini"
+
+# Log level
+LOG_LEVEL = "INFO"
+```
+
+5. Click **Save**
+6. Vào **☰ → Settings → General → ⏻ Reboot app** (cần reboot để secrets生效)
+
+> 💡 **Chưa có OpenAI key?** 
+> 1. Vào https://platform.openai.com/api-keys
+> 2. Click **+ Create new secret key**
+> 3. Copy key dạng `sk-proj-...`
+> 4. Dán vào Secrets ở trên
+> 5. Cần $5 credit — đăng ký mới được tặng $5 free!
+
+**b) Dùng thử ngay trên app:**
+
+Sau khi reboot, vào sidebar → **Model Provider** → chọn **🔵 OpenAI** → app sẽ dùng GPT trả lời thực tế!
 
 | Secret Key | Giá trị | Bắt buộc? |
 |---|---|---|
-| `MODEL_PROVIDER` | `mock` | ✅ (mặc định) |
-| `OPENAI_API_KEY` | `sk-...` | Chỉ khi dùng OpenAI |
+| `MODEL_PROVIDER` | `"openai"` | ✅ Để dùng OpenAI |
+| `OPENAI_API_KEY` | `"sk-proj-..."` | ✅ Bắt buộc |
+| `OPENAI_MODEL` | `"gpt-4o-mini"` | Optional |
+| `LOG_LEVEL` | `"INFO"` | Optional |
 
-> Lưu ý: **Ollama không chạy được trên Cloud** vì cần GPU local. Trên Cloud chỉ dùng Mock hoặc OpenAI.
+> ⚠️ **Lưu ý**: Secrets chỉ có hiệu lực sau khi **Reboot** app. Streamlit Cloud tự động restart app khi secrets thay đổi, nhưng nếu không, hãy reboot thủ công.
 >
-> Với Mock mode, app vẫn hoạt động đầy đủ — bạn có thể test Plugin, Knowledge, Memory, và toàn bộ UI.
+> **Ollama không chạy được trên Cloud** — cần GPU local. Trên Cloud chỉ dùng Mock hoặc OpenAI.
 >
 > 💡 Repo của bạn tên là **Project-Atlas**, phù hợp với tên dự án gốc!
+
+---
+
+## 🤝 Đóng góp
+
+Project Atlas là open source! Mọi đóng góp đều được chào đón:
+
+| File | Mô tả |
+|---|---|
+| [CONTRIBUTING.md](CONTRIBUTING.md) 📖 | Hướng dẫn đóng góp chi tiết |
+| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) 📜 | Quy tắc ứng xử |
+| [SECURITY.md](SECURITY.md) 🔒 | Chính sách bảo mật |
+| [.github/ISSUE_TEMPLATE/](.github/ISSUE_TEMPLATE/) 🐛 | Templates cho Bug Report & Feature Request |
+| [.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md) 🔀 | Template cho Pull Request |
+| [docs/](docs/) 📚 | Wiki-style documentation (modules, FAQ, architecture) |
+
+### Cách đóng góp nhanh
+
+```bash
+1. Fork repo
+2. Tạo branch: git checkout -b feature/ten-tinh-nang
+3. Code + Test
+4. Commit: git commit -m "feat: Mô tả"
+5. Push + Pull Request
+```
 
 ---
 

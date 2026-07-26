@@ -1,5 +1,46 @@
 # Changelog
 
+## v0.5.2-alpha (Community + Deploy) — Push lên GitHub + Streamlit Cloud
+
+**Release date:** 2026-07-27
+
+### 🐛 Bug Fix
+- **SQLite threading error on Streamlit Cloud**: Added `check_same_thread=False` to `sqlite3.connect()` in `src/memory/__init__.py` – fix cho lỗi "SQLite objects created in a thread can only be used in that same thread"
+
+### 🆕 Community Infrastructure
+- **Issue templates**: Bug Report (`bug_report.md`) + Feature Request (`feature_request.md`) + config.yml
+- **Pull Request template**: Checklist format + CI requirements
+- **`CONTRIBUTING.md`**: Hướng dẫn đóng góp 15 trang (branch naming, commit format, code style, testing, PR process)
+- **`CODE_OF_CONDUCT.md`**: Contributor Covenant 2.1
+- **`SECURITY.md`**: Chính sách bảo mật + báo cáo lỗ hổng
+
+### 📚 Wiki Documentation (`docs/`)
+- `01-getting-started.md`: Hướng dẫn cài đặt từ A-Z
+- `02-architecture.md`: Kiến trúc module + data flow diagrams
+- `03-modules-api.md`: API reference cho Memory, Plugin, Workflow, Knowledge
+- `04-contributing.md`: Tóm tắt đóng góp nhanh
+- `05-faq.md`: 15+ câu hỏi thường gặp
+
+### 🚀 GitHub + Streamlit Cloud
+- **Git push**: Code đã push lên `phuclekl7-droid/Project-Atlas`
+- **GitHub Actions**: CI workflow đã chạy thành công (1m 34s)
+- **Streamlit Cloud**: Deployed tại https://phuclekl7-droid-project-atlas.streamlit.app
+- **GitHub Release**: Template release notes v0.5.0-alpha sẵn sàng
+- **README badges**: GitHub Actions + Python version + Streamlit App badges
+
+### 📊 Project Progress
+| Hạng mục | Trạng thái |
+|---|---|
+| Code push lên GitHub | ✅ Done |
+| CI/CD (GitHub Actions) | ✅ Running |
+| Streamlit Cloud deploy | ✅ Live |
+| Issue/PR templates | ✅ Ready |
+| Contributing guide | ✅ Ready |
+| Wiki docs | ✅ 5 pages |
+| SECURITY.md | ✅ Ready |
+
+---
+
 ## v0.5.1-alpha (Deployment) — Streamlit Cloud + GitHub
 
 **Release date:** 2026-07-27

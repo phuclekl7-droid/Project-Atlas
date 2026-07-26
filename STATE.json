@@ -1,18 +1,29 @@
 {
-  "project": "Personal AI Assistant",
-  "version": "0.5.0-alpha",
-  "progress_pct": 92,
+  "project": "Project Atlas",
+  "version": "v0.5.2-alpha",
+  "repo": "phuclekl7-droid/Project-Atlas",
+  "streamlit_url": "https://phuclekl7-droid-project-atlas.streamlit.app",
+  "progress_pct": 95,
   "state": {
     "core": "implemented + tested",
     "settings": "implemented + tested",
     "model_router": "implemented + tested",
-    "memory": "implemented + tested",
+    "memory": "implemented + tested (fixed SQLite threading)",
     "plugin": "implemented + tested",
     "workflow": "implemented + tested",
     "knowledge": "implemented + tested",
-    "ui": "implemented",
+    "ui": "implemented (Streamlit + CLI)",
     "cli": "implemented",
-    "ci_cd": "setup"
+    "ci_cd": "setup + running on GitHub Actions",
+    "deployment": "deployed to Streamlit Cloud",
+    "community": "setup (templates, contributing, code of conduct)",
+    "docs": "5 wiki pages + README"
+  },
+  "github": {
+    "repo": "https://github.com/phuclekl7-droid/Project-Atlas",
+    "actions": "https://github.com/phuclekl7-droid/Project-Atlas/actions",
+    "issues": "https://github.com/phuclekl7-droid/Project-Atlas/issues",
+    "streamlit": "https://phuclekl7-droid-project-atlas.streamlit.app"
   },
   "last_updated": "2026-07-27",
   "phases": {
@@ -31,16 +42,22 @@
       "modules": ["knowledge"],
       "status": "completed"
     },
-    "4_polish": {
-      "name": "Polish & Production",
-      "modules": ["optimization", "documentation", "deployment"],
+    "4_deployment": {
+      "name": "GitHub + Streamlit Cloud Deploy",
+      "modules": ["github", "streamlit_cloud", "community", "docs"],
+      "status": "completed"
+    },
+    "5_optimization": {
+      "name": "Optimization & Advanced",
+      "modules": ["caching", "async", "docker", "multimodal"],
       "status": "pending"
     }
   },
   "next_goals": [
-    "Optimization: caching, async, streaming",
-    "Documentation: full API docs, user guide",
-    "Deployment: Docker setup, one-click install",
-    "Advanced: LangChain integration, multi-modal support"
+    "Caching layer for knowledge search + model responses",
+    "Async model calls for smoother UI",
+    "Docker deployment (Dockerfile + docker-compose)",
+    "LangChain integration for advanced agents",
+    "Multi-modal support (image, audio)"
   ]
 }

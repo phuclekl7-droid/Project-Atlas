@@ -28,6 +28,7 @@ from src.core import (
     setup_logger,
     truncate_text,
 )
+from src.core.cache import SimpleTTLCache, make_knowledge_cache_key
 from src.memory import Memory
 from src.model_router import ModelResponse, ModelRouter
 from src.plugin import PluginLoader, PluginResult
@@ -111,6 +112,9 @@ class Workflow:
         plugin_loader: Optional[PluginLoader] = None,
         knowledge_base: Optional['ChromaDBKnowledgeBase'] = None,
         max_context_messages: int = 10,
+        cache_ttl_knowledge: int = 600,  # 10 min for KB search
+        cache_ttl_model: int = 3600,     # 1 hour for model responses
+        cache_max_size: int = 200,
     ):
         self.memory = memory
         self.model_router = model_router
@@ -118,11 +122,18 @@ class Workflow:
         self.knowledge_base = knowledge_base
         self.max_context_messages = max_context_messages
 
+        # Initialize caches
+        self.kb_cache = SimpleTTLCache(
+            max_size=cache_max_size,
+            ttl_seconds=cache_ttl_knowledge,
+        )
+
         # Stats tracking
         self.total_processed: int = 0
         self.total_llm_calls: int = 0
         self.total_plugin_calls: int = 0
         self.total_kb_lookups: int = 0
+        self.total_cache_hits: int = 0
 
         kb_status = f"knowledge={knowledge_base.__class__.__name__}" if knowledge_base else "knowledge=None"
         logger.info(
@@ -130,7 +141,9 @@ class Workflow:
             f"memory={memory.db_path}, "
             f"model={model_router.model.model_name}, "
             f"plugins={len(plugin_loader.get_all()) if plugin_loader else 0}, "
-            f"{kb_status}"
+            f"{kb_status}, "
+            f"kb_cache_ttl={cache_ttl_knowledge}s, "
+            f"model_cache_ttl={cache_ttl_model}s"
         )
 
     # ── Main Processing ──
@@ -238,16 +251,33 @@ class Workflow:
 
         return None
 
-    # ── Knowledge Base Lookup ──
+    # ── Knowledge Base Lookup (with caching) ──
 
     def _enrich_with_knowledge(self, prompt: str) -> str:
-        """Search knowledge base and append relevant context to the prompt."""
+        """Search knowledge base and append relevant context to the prompt.
+
+        Results are cached using SimpleTTLCache to avoid repeated searches
+        for similar queries within the TTL window.
+        """
         if not self.knowledge_base or not self.knowledge_base.available:
             return prompt
 
+        # Check cache first
+        cache_key = make_knowledge_cache_key(prompt, n_results=3)
+        cached = self.kb_cache.get(cache_key)
+        if cached is not None:
+            if cached == "__no_results__":
+                return prompt  # No results, no enrichment needed
+            self.total_cache_hits += 1
+            logger.debug("Knowledge cache HIT")
+            return cached
+
+        # Cache miss — search knowledge base
         try:
             results = self.knowledge_base.search(prompt, n_results=3)
             if not results:
+                # Cache the miss so we don't re-query for the same prompt
+                self.kb_cache.set(cache_key, "__no_results__")
                 return prompt
 
             self.total_kb_lookups += 1
@@ -268,6 +298,9 @@ class Workflow:
                 f"---\n\n"
                 f"Use the above knowledge to answer the user's question if relevant."
             )
+
+            # Store in cache
+            self.kb_cache.set(cache_key, enriched)
 
             logger.debug(f"Enriched prompt with {len(results)} knowledge chunks")
             return enriched
@@ -291,12 +324,19 @@ class Workflow:
 
     def get_stats(self) -> dict:
         """Get workflow execution statistics."""
+        kb_cache_stats = self.kb_cache.get_stats() if hasattr(self, 'kb_cache') else {}
         return {
             "total_processed": self.total_processed,
             "total_llm_calls": self.total_llm_calls,
             "total_plugin_calls": self.total_plugin_calls,
             "total_kb_lookups": self.total_kb_lookups,
+            "total_cache_hits": self.total_cache_hits,
             "context_limit": self.max_context_messages,
+            "kb_cache": {
+                "size": kb_cache_stats.get("size", 0),
+                "max_size": kb_cache_stats.get("max_size", 0),
+                "hit_rate_pct": kb_cache_stats.get("hit_rate_pct", 0),
+            },
         }
 
     def __repr__(self) -> str:

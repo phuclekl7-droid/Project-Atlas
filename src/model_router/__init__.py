@@ -19,6 +19,7 @@ from src.core import (
     setup_logger,
     truncate_text,
 )
+from src.core.cache import SimpleTTLCache, make_model_cache_key
 from src.settings import (
     PROVIDER_MOCK,
     PROVIDER_OLLAMA,
@@ -358,7 +359,8 @@ class ModelRouter:
     """
     Routes prompts to the appropriate model provider based on settings.
 
-    Now supports conversation context via the `context` parameter.
+    Supports conversation context via the `context` parameter
+    and optional caching of model responses.
 
     Usage:
         router = ModelRouter(settings)
@@ -372,13 +374,23 @@ class ModelRouter:
         PROVIDER_OPENAI: OpenAIModel,
     }
 
-    def __init__(self, settings: Settings):
+    def __init__(
+        self,
+        settings: Settings,
+        cache_ttl: int = 3600,  # 1 hour default
+        cache_max_size: int = 100,
+    ):
         self.settings = settings
         self.model = self._create_model()
+        self._cache = SimpleTTLCache(
+            max_size=cache_max_size,
+            ttl_seconds=cache_ttl,
+        )
         logger.info(
             f"ModelRouter initialized: "
             f"provider={settings.model_provider}, "
-            f"model={self.model.model_name}"
+            f"model={self.model.model_name}, "
+            f"cache_ttl={cache_ttl}s"
         )
 
     def _create_model(self) -> BaseModel:
@@ -397,6 +409,7 @@ class ModelRouter:
         self,
         prompt: str,
         context: Optional[list[dict]] = None,
+        use_cache: bool = True,
         **kwargs,
     ) -> ModelResponse:
         """
@@ -405,7 +418,7 @@ class ModelRouter:
         Args:
             prompt: The input text
             context: Optional list of {"role": str, "content": str} dicts
-                     representing conversation history (oldest first).
+            use_cache: Whether to check and store in response cache
             **kwargs: Additional parameters passed to the underlying model
 
         Returns:
@@ -414,9 +427,33 @@ class ModelRouter:
         if not prompt or not prompt.strip():
             raise AssistantError("Prompt cannot be empty")
 
+        # Check cache first (skip for Mock to always get fresh responses)
+        if use_cache and self.settings.model_provider != PROVIDER_MOCK:
+            cache_key = make_model_cache_key(prompt, context, self.model.model_name)
+            cached = self._cache.get(cache_key)
+            if cached is not None:
+                logger.debug("Model response cache HIT")
+                return cached
+
+        # Cache miss — call the actual model
         ctx_info = f", context={len(context)} messages" if context else ""
         logger.debug(f"Routing prompt ({len(prompt)} chars{ctx_info}) to {self.model}")
-        return self.model.generate(prompt, context=context, **kwargs)
+        response = self.model.generate(prompt, context=context, **kwargs)
+
+        # Store in cache (skip Mock)
+        if use_cache and self.settings.model_provider != PROVIDER_MOCK:
+            cache_key = make_model_cache_key(prompt, context, self.model.model_name)
+            self._cache.set(cache_key, response)
+
+        return response
+
+    def clear_cache(self) -> int:
+        """Clear the model response cache. Returns number of entries cleared."""
+        return self._cache.clear()
+
+    def get_cache_stats(self) -> dict:
+        """Get model cache statistics."""
+        return self._cache.get_stats()
 
     def __repr__(self) -> str:
         return f"ModelRouter(provider={self.settings.model_provider}, model={self.model})"

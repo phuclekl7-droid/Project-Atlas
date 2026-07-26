@@ -34,6 +34,14 @@ from src.settings import (
 # Default Values
 # ============================================================
 
+@pytest.fixture(autouse=True)
+def clear_env_vars(monkeypatch):
+    """Clear environment variables for clean testing to prevent .env pollution."""
+    keys = ["MODEL_PROVIDER", "OLLAMA_MODEL", "OLLAMA_URL", "OPENAI_API_KEY", 
+            "OPENAI_MODEL", "GEMINI_API_KEY", "GEMINI_MODEL", "LOG_LEVEL", 
+            "MEMORY_PATH", "MAX_CONTEXT_MESSAGES"]
+    for k in keys:
+        monkeypatch.delenv(k, raising=False)
 
 class TestSettingsDefaults:
     def test_default_provider_is_mock(self):

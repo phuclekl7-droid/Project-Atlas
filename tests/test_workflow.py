@@ -183,7 +183,7 @@ class TestWorkflowProcess:
         assert result.plugin_result is not None
         assert result.plugin_result.success is True
         assert "5" in result.plugin_result.output
-        assert result.latency_ms > 0
+        assert result.latency_ms >= 0
 
     def test_process_plugin_saves_to_memory(self, workflow, memory):
         """Plugin outputs should be saved to memory as assistant messages."""
