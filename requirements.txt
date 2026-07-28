@@ -3,23 +3,48 @@
 python-dotenv>=1.0.0
 requests>=2.31.0
 aiohttp>=3.9.0
+google-generativeai>=0.8.0
+
+# Token counting (rate limiting & context pruning)
+tiktoken>=0.7.0
+
+# Optional: web_search fallback
+beautifulsoup4>=4.12.0  # For DuckDuckGo HTML parsing fallback
 
 # Testing
 pytest>=8.0.0
 pytest-mock>=3.14.0
+pytest-asyncio>=0.24.0
+
+# Async testing
 
 # Vector Store (RAG)
 chromadb>=0.5.0
+pypdf>=5.0.0
+python-docx>=1.1.0
+
+# Folder Auto-Indexer (Feature 151)
+watchdog>=4.0.0
+
+# Audio Transcription (Feature 153)
+# openai-whisper>=20231117  # Uncomment to enable offline audio transcription
+
+# CLI
+click>=8.1.0
+typer>=0.12.0
+rich>=13.0.0
 
 # Web UI
 streamlit>=1.35.0
 
+# FastAPI Backend (decoupled architecture)
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+
 # Code quality (CI & pre-commit)
-pre-commit>=3.7.0
-flake8>=7.1.0
-black>=24.4.0
-isort>=5.13.0
-mypy>=1.10.0
+pre-commit>=3.8.0
+ruff>=0.6.0
+mypy>=1.11.0
 bandit>=1.7.8
 
 # CI

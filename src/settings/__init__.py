@@ -12,6 +12,7 @@ from typing import Optional
 from dotenv import load_dotenv
 
 from src.core import ConfigurationError, setup_logger
+from src.core.encryption import Encryptor
 
 logger = setup_logger("settings")
 
@@ -68,10 +69,21 @@ class Settings:
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.0-flash"
 
+    # Weather
+    weather_api_key: str = ""
+
     # System
     log_level: str = "INFO"
     memory_path: str = str(PROJECT_ROOT / "data" / "memory.db")
     max_context_messages: int = 10
+
+    # Token & Rate Limiting
+    max_context_tokens: int = 4096  # Max estimated tokens for context pruning
+    rate_limit_requests: int = 60   # Max API requests per minute (0 = unlimited)
+    rate_limit_tokens: int = 100000  # Max tokens per minute (0 = unlimited, e.g. GPT-4o-mini tier)
+
+    # Multi-Model Routing
+    multi_model_enabled: bool = False  # Auto-route messages to best provider
 
     # Internal
     config_path: Path = field(default_factory=lambda: DEFAULT_CONFIG_PATH, repr=False)
@@ -107,6 +119,9 @@ class Settings:
             "log_level": self.log_level,
             "memory_path": self.memory_path,
             "max_context_messages": self.max_context_messages,
+            "max_context_tokens": self.max_context_tokens,
+            "rate_limit_requests": self.rate_limit_requests,
+            "rate_limit_tokens": self.rate_limit_tokens,
         }
 
     def __repr__(self) -> str:
@@ -173,8 +188,18 @@ def load_settings(
     if json_config:
         logger.debug(f"Loaded config from {config_path}")
 
-    # Step 3: Read with priority: env var > json config > default
-    get_env = lambda key, default="": os.environ.get(key, json_config.get(key.lower(), default))
+    # Step 3: Decrypt encrypted values via Encryptor (Feature 73)
+    encryptor = Encryptor(key_file=str(Path(Settings.memory_path).parent / ".secret.key"))
+
+    def _get_env(key: str, default: str = "") -> str:
+        """Get env value and transparently decrypt if encrypted."""
+        raw = os.environ.get(key, json_config.get(key.lower(), default))
+        if raw.startswith("$aes$") or raw.startswith("$b64$"):
+            return encryptor.decrypt(raw)
+        return raw
+
+    # Step 4: Read with priority: env var > json config > default
+    get_env = lambda key, default="": _get_env(key, default)
 
     settings = Settings(
         model_provider=get_env("MODEL_PROVIDER", Settings.model_provider),
@@ -184,11 +209,24 @@ def load_settings(
         openai_model=get_env("OPENAI_MODEL", Settings.openai_model),
         gemini_api_key=get_env("GEMINI_API_KEY", Settings.gemini_api_key),
         gemini_model=get_env("GEMINI_MODEL", Settings.gemini_model),
+        weather_api_key=get_env("WEATHER_API_KEY", Settings.weather_api_key),
         log_level=get_env("LOG_LEVEL", Settings.log_level),
         memory_path=get_env("MEMORY_PATH", Settings.memory_path),
         max_context_messages=_safe_int(
             get_env("MAX_CONTEXT_MESSAGES", str(Settings.max_context_messages)),
             Settings.max_context_messages,
+        ),
+        max_context_tokens=_safe_int(
+            get_env("MAX_CONTEXT_TOKENS", str(Settings.max_context_tokens)),
+            Settings.max_context_tokens,
+        ),
+        rate_limit_requests=_safe_int(
+            get_env("RATE_LIMIT_REQUESTS", str(Settings.rate_limit_requests)),
+            Settings.rate_limit_requests,
+        ),
+        rate_limit_tokens=_safe_int(
+            get_env("RATE_LIMIT_TOKENS", str(Settings.rate_limit_tokens)),
+            Settings.rate_limit_tokens,
         ),
         config_path=config_path,
     )

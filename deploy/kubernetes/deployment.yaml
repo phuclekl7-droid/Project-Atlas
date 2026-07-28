@@ -1,0 +1,83 @@
+# Feature #81: Kubernetes Deployment Manifests
+# Main deployment for Project Atlas Streamlit app
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: atlas
+  namespace: project-atlas
+  labels:
+    app: atlas
+    version: v0.7.0
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: atlas
+  template:
+    metadata:
+      labels:
+        app: atlas
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8501"
+    spec:
+      containers:
+      - name: atlas
+        image: ghcr.io/your-username/project-atlas:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8501
+          name: http
+        - containerPort: 8000
+          name: health
+        envFrom:
+        - configMapRef:
+            name: atlas-config
+        - secretRef:
+            name: atlas-secrets
+        resources:
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
+          limits:
+            cpu: "1000m"
+            memory: "1Gi"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+        volumeMounts:
+        - name: data
+          mountPath: /app/data
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: atlas-data
+---
+# PersistentVolumeClaim for data persistence
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: atlas-data
+  namespace: project-atlas
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi

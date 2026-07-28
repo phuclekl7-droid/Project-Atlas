@@ -5,6 +5,7 @@ Provides:
 - Text chunking and processing for uploaded files
 - ChromaDB vector storage for semantic search
 - Integration with Workflow for context injection
+- Local folder auto-indexer (watchdog-based)
 
 Usage:
     kb = KnowledgeBase(path="data/knowledge")
@@ -13,7 +14,10 @@ Usage:
 """
 
 import hashlib
+import os
 import re
+import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Union
@@ -21,6 +25,131 @@ from typing import Optional, Union
 from src.core import setup_logger
 
 logger = setup_logger("knowledge")
+
+
+# ── Optional watchdog for folder auto-indexing ──
+_HAVE_WATCHDOG = False
+_WATCHDOG_OBSERVER = None
+_WATCHDOG_THREAD = None
+
+try:
+    from watchdog.observers import Observer as WatchdogObserver
+    from watchdog.events import FileSystemEventHandler
+    _HAVE_WATCHDOG = True
+except ImportError:
+    WatchdogObserver = None
+    FileSystemEventHandler = object
+
+
+# ============================================================
+# File Extraction (PDF, DOCX, TXT)
+# ============================================================
+
+# Supported file extensions and their descriptions
+SUPPORTED_EXTENSIONS = {
+    ".txt": "Plain Text",
+    ".pdf": "PDF Document",
+    ".docx": "Word Document",
+}
+
+
+# Optional imports for PDF and DOCX processing
+try:
+    from pypdf import PdfReader
+except ImportError:
+    PdfReader = None
+
+try:
+    from docx import Document
+except ImportError:
+    Document = None
+
+
+def extract_text_from_pdf(file_bytes: bytes) -> str:
+    """
+    Extract text from a PDF file using pypdf.
+
+    Args:
+        file_bytes: Raw PDF file bytes
+
+    Returns:
+        Extracted text, or empty string on failure
+    """
+    if PdfReader is None:
+        logger.warning("pypdf not installed. Run: pip install pypdf")
+        return ""
+    try:
+        import io
+        reader = PdfReader(io.BytesIO(file_bytes))
+        pages = []
+        for page in reader.pages:
+            text = page.extract_text()
+            if text:
+                pages.append(text)
+        return "\n\n".join(pages)
+    except Exception as e:
+        logger.warning(f"Failed to extract text from PDF: {e}")
+        return ""
+
+
+def extract_text_from_docx(file_bytes: bytes) -> str:
+    """
+    Extract text from a DOCX file using python-docx.
+
+    Args:
+        file_bytes: Raw DOCX file bytes
+
+    Returns:
+        Extracted text, or empty string on failure
+    """
+    if Document is None:
+        logger.warning("python-docx not installed. Run: pip install python-docx")
+        return ""
+    try:
+        import io
+        doc = Document(io.BytesIO(file_bytes))
+        paragraphs = []
+        for para in doc.paragraphs:
+            text = para.text.strip()
+            if text:
+                paragraphs.append(text)
+        return "\n\n".join(paragraphs)
+    except Exception as e:
+        logger.warning(f"Failed to extract text from DOCX: {e}")
+        return ""
+
+
+def extract_text_from_file(filename: str, file_bytes: bytes) -> str:
+    """
+    Extract text from a file based on its extension.
+
+    Supports: .txt, .pdf, .docx
+
+    Args:
+        filename: Original filename (used to detect type)
+        file_bytes: Raw file bytes
+
+    Returns:
+        Extracted text content, or empty string on failure
+    """
+    ext = Path(filename).suffix.lower()
+
+    if ext == ".pdf":
+        return extract_text_from_pdf(file_bytes)
+    elif ext == ".docx":
+        return extract_text_from_docx(file_bytes)
+    elif ext == ".txt":
+        try:
+            return file_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            try:
+                return file_bytes.decode("latin-1")
+            except Exception:
+                logger.warning(f"Cannot decode text file: {filename}")
+                return ""
+    else:
+        logger.warning(f"Unsupported file type: {ext} for {filename}")
+        return ""
 
 
 # ============================================================
@@ -198,7 +327,38 @@ class ChromaDBKnowledgeBase:
 
     # ── Document Management ──
 
-    def add_text(self, filename: str, text: str) -> Optional[str]:
+    def _normalize_filename(self, filename: str) -> str:
+        """Normalize path separators to forward slashes for cross-platform consistency."""
+        return Path(filename).as_posix()
+
+    def add_file(self, filename: str, file_bytes: bytes, chunk_size: int = 500, chunk_overlap: int = 100) -> Optional[str]:
+        """
+        Add a file to the knowledge base by extracting text based on type.
+
+        Supports: .txt, .pdf, .docx
+
+        Args:
+            filename: Original filename (extension used to detect type)
+            file_bytes: Raw file bytes
+            chunk_size: Target chunk size in characters (Feature 159)
+            chunk_overlap: Overlap between chunks (Feature 159)
+
+        Returns:
+            Document ID if successful, None if failed
+        """
+        if not file_bytes:
+            logger.warning(f"Empty file: {filename}")
+            return None
+
+        normalized = self._normalize_filename(filename)
+        text = extract_text_from_file(normalized, file_bytes)
+        if not text.strip():
+            logger.warning(f"No text extracted from {filename}")
+            return None
+
+        return self.add_text(normalized, text, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+
+    def add_text(self, filename: str, text: str, chunk_size: int = 500, chunk_overlap: int = 100) -> Optional[str]:
         """
         Add a text document to the knowledge base.
 
@@ -219,6 +379,9 @@ class ChromaDBKnowledgeBase:
             logger.warning(f"Empty text for {filename}, skipping")
             return None
 
+        # Normalize path separators for cross-platform consistency
+        filename = self._normalize_filename(filename)
+
         # Generate document ID
         doc_id = hashlib.sha256(f"{filename}:{text[:100]}".encode()).hexdigest()[:16]
 
@@ -228,8 +391,8 @@ class ChromaDBKnowledgeBase:
             logger.info(f"Document '{filename}' already exists, skipping")
             return doc_id
 
-        # Chunk text
-        chunks = chunk_text(text)
+        # Chunk text with configurable size/overlap (Feature 159)
+        chunks = chunk_text(text, chunk_size=chunk_size, overlap=chunk_overlap)
 
         if not chunks:
             logger.warning(f"No chunks created for {filename}")
@@ -436,10 +599,29 @@ class SimpleKnowledgeBase:
     def available(self) -> bool:
         return True
 
+    def _normalize_filename(self, filename: str) -> str:
+        """Normalize path separators to forward slashes for cross-platform consistency."""
+        return Path(filename).as_posix()
+
+    def add_file(self, filename: str, file_bytes: bytes) -> Optional[str]:
+        """Add a file to the knowledge base by extracting text based on type."""
+        if not file_bytes:
+            logger.warning(f"Empty file: {filename}")
+            return None
+        normalized = self._normalize_filename(filename)
+        text = extract_text_from_file(normalized, file_bytes)
+        if not text.strip():
+            logger.warning(f"No text extracted from {filename}")
+            return None
+        return self.add_text(normalized, text)
+
     def add_text(self, filename: str, text: str) -> Optional[str]:
         if not text.strip():
             logger.warning(f"Empty text for {filename}, skipping")
             return None
+
+        # Normalize path separators for cross-platform consistency
+        filename = self._normalize_filename(filename)
 
         doc_id = hashlib.sha256(f"{filename}:{text[:100]}".encode()).hexdigest()[:16]
 
@@ -519,6 +701,144 @@ class SimpleKnowledgeBase:
             "documents": len(self._docs),
             "path": self.path,
         }
+
+
+# ============================================================
+# Local Folder Auto-Indexer (watchdog-based)
+# ============================================================
+
+
+class FolderIndexerHandler(FileSystemEventHandler):
+    """
+    Watchdog event handler that auto-indexes new files into the knowledge base.
+
+    Fires when files are created or modified in the watched directory.
+    Debounces rapid events (e.g., during file download).
+    """
+
+    def __init__(self, knowledge_base, extensions: tuple = (".txt", ".pdf", ".docx"), debounce_sec: float = 2.0):
+        self.kb = knowledge_base
+        self.extensions = extensions
+        self.debounce_sec = debounce_sec
+        self._last_events: dict[str, float] = {}
+
+    def on_created(self, event):
+        if event.is_directory:
+            return
+        self._process_file(event.src_path)
+
+    def on_modified(self, event):
+        if event.is_directory:
+            return
+        self._process_file(event.src_path)
+
+    def on_moved(self, event):
+        if event.is_directory:
+            return
+        self._process_file(event.dest_path)
+
+    def _process_file(self, file_path: str):
+        """Process a single file after debounce."""
+        path = Path(file_path)
+        if path.suffix.lower() not in self.extensions:
+            return
+
+        # Debounce: ignore rapid repeated events
+        now = time.time()
+        last = self._last_events.get(file_path, 0)
+        if now - last < self.debounce_sec:
+            return
+        self._last_events[file_path] = now
+
+        try:
+            file_bytes = path.read_bytes()
+            if not file_bytes:
+                return
+
+            # Use the relative filename from the watched root
+            # The kb already deduplicates by content hash
+            result = self.kb.add_file(path.name, file_bytes)
+            if result:
+                logger.info(f"🌐 Auto-indexed: {path.name}")
+            else:
+                logger.debug(f"Auto-index skipped (already exists or empty): {path.name}")
+        except Exception as e:
+            logger.warning(f"Auto-index failed for {path.name}: {e}")
+
+
+class FolderWatcher:
+    """
+    Manages a watchdog observer for auto-indexing a local folder.
+
+    Usage:
+        watcher = FolderWatcher("~/Atlas_Docs", kb)
+        watcher.start()
+        ...
+        watcher.stop()
+    """
+
+    def __init__(
+        self,
+        folder_path: str,
+        knowledge_base,
+        extensions: tuple = (".txt", ".pdf", ".docx"),
+        recursive: bool = True,
+    ):
+        if not _HAVE_WATCHDOG:
+            raise ImportError(
+                "watchdog is required for folder auto-indexing. "
+                "Install: pip install watchdog"
+            )
+
+        self.folder_path = str(folder_path)
+        self.knowledge_base = knowledge_base
+        self.extensions = extensions
+        self.recursive = recursive
+        self._observer: Optional[WatchdogObserver] = None
+        self._running = False
+
+    def start(self):
+        """Start watching the folder for new/modified files."""
+        if self._running:
+            logger.warning(f"FolderWatcher already running for {self.folder_path}")
+            return
+
+        folder = Path(self.folder_path)
+        folder.mkdir(parents=True, exist_ok=True)
+
+        handler = FolderIndexerHandler(
+            self.knowledge_base,
+            extensions=self.extensions,
+        )
+
+        self._observer = WatchdogObserver()
+        self._observer.schedule(
+            handler,
+            str(folder),
+            recursive=self.recursive,
+        )
+        self._observer.start()
+        self._running = True
+        logger.info(f"📁 FolderWatcher started: {self.folder_path}")
+
+    def stop(self):
+        """Stop watching the folder."""
+        if self._observer and self._running:
+            self._observer.stop()
+            self._observer.join(timeout=3)
+            self._running = False
+            logger.info(f"📁 FolderWatcher stopped: {self.folder_path}")
+
+    def is_running(self) -> bool:
+        return self._running
+
+    def __del__(self):
+        self.stop()
+
+
+def is_watchdog_available() -> bool:
+    """Check if watchdog library is installed."""
+    return _HAVE_WATCHDOG
 
 
 def create_knowledge_base(path: str = "data/knowledge") -> Union[ChromaDBKnowledgeBase, "SimpleKnowledgeBase"]:

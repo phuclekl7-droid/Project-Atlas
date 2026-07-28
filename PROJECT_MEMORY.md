@@ -82,3 +82,9 @@
 - **Quyết định:** Workflow tự động search KB và enrich prompt, không dùng agent loop.
 - **Lý do:** Đơn giản, hiệu quả, không over-engineering.
 - **Tình trạng:** Đã triển khai trong `Workflow._enrich_with_knowledge()`.
+
+**ADR 013: Async Workflow Processor**
+- **Quyết định:** Thêm `process_async()` và `process_stream()` vào Workflow, dùng `ModelRouter.generate_async()` và `ModelRouter.generate_stream()`.
+- **Lý do:** ModelRouter đã hỗ trợ async/streaming, nhưng Workflow.process() vẫn sync. Thêm async cho phép toàn bộ pipeline chạy non-blocking, UI mượt mà hơn.
+- **Chi tiết:** Plugin execution giữ sync (fast local), model call chạy async. `process_stream()` dùng async generator cho streaming token-by-token. Sync `process()` giữ nguyên cho backward compatibility.
+- **Tình trạng:** Đã triển khai — `src/workflow/__init__.py:229-532`.

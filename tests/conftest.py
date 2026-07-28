@@ -9,7 +9,7 @@ Provides:
 
 import pytest
 
-from src.settings import Settings, PROVIDER_MOCK, PROVIDER_OLLAMA, PROVIDER_OPENAI
+from src.settings import Settings, PROVIDER_MOCK, PROVIDER_OLLAMA, PROVIDER_OPENAI, PROVIDER_GEMINI
 
 
 # ── Disable logging during tests (cleaner output) ──
@@ -53,6 +53,16 @@ def openai_settings() -> Settings:
         model_provider=PROVIDER_OPENAI,
         openai_api_key="sk-test-fake-key-12345",
         openai_model="gpt-4o-mini",
+    )
+
+
+@pytest.fixture
+def gemini_settings() -> Settings:
+    """Return a Settings instance configured for Gemini (with fake key)."""
+    return Settings(
+        model_provider=PROVIDER_GEMINI,
+        gemini_api_key="fake-gemini-key-12345",
+        gemini_model="gemini-2.0-flash",
     )
 
 
@@ -102,3 +112,75 @@ def mock_openai_chat_response() -> dict:
 def mock_ollama_error_response() -> dict:
     """Ollama error response (model not found)."""
     return {"error": "model 'nonexistent' not found"    }
+
+
+# ── Memory & Model Router Fixtures (shared by multiple test files) ──
+
+
+@pytest.fixture
+def memory(tmp_path) -> "Memory":
+    """Create a temporary Memory instance."""
+    from src.memory import Memory
+    db_path = tmp_path / "test_shared.db"
+    mem = Memory(str(db_path))
+    yield mem
+    mem.close()
+
+
+@pytest.fixture
+def model_router(mock_settings) -> "ModelRouter":
+    """Create a ModelRouter with Mock provider."""
+    from src.model_router import ModelRouter
+    return ModelRouter(mock_settings)
+
+
+@pytest.fixture
+def plugin_loader() -> "PluginLoader":
+    """Create a PluginLoader and discover plugins."""
+    from src.plugin import PluginLoader
+    loader = PluginLoader(plugin_package="src.plugins")
+    loader.discover()
+    return loader
+
+
+@pytest.fixture
+def workflow(memory, model_router, plugin_loader) -> "Workflow":
+    """Create a Workflow with all dependencies."""
+    from src.workflow import Workflow
+    return Workflow(
+        memory=memory,
+        model_router=model_router,
+        plugin_loader=plugin_loader,
+        max_context_messages=5,
+    )
+
+
+@pytest.fixture
+def workflow_no_plugins(memory, model_router) -> "Workflow":
+    """Create a Workflow without plugins."""
+    from src.workflow import Workflow
+    return Workflow(
+        memory=memory,
+        model_router=model_router,
+        plugin_loader=None,
+        max_context_messages=5,
+    )
+
+
+# ── Token Counter Fixtures ──
+
+
+@pytest.fixture
+def token_counter() -> "TokenCounter":
+    """Create a TokenCounter instance (uses character-based fallback if tiktoken unavailable)."""
+    from src.core.token_counter import TokenCounter
+    return TokenCounter()
+
+
+@pytest.fixture
+def token_counter_with_tiktok() -> "Optional[TokenCounter]":
+    """Create a TokenCounter only if tiktoken is available. Returns None otherwise."""
+    from src.core.token_counter import TokenCounter, _HAS_TIKTOKEN
+    if not _HAS_TIKTOKEN:
+        return None
+    return TokenCounter(model_name="gpt-4o-mini")

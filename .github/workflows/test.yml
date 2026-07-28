@@ -36,12 +36,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Lint with flake8
+      - name: Lint with ruff
         run: |
-          # Syntax errors & undefined names (fail on these)
-          flake8 src/ tests/ app.py --count --select=E9,F63,F7,F82 --show-source --statistics
-          # Style warnings (don't fail)
-          flake8 src/ tests/ app.py --count --exit-zero --max-complexity=10 --max-line-length=100 --statistics
+          # Lint (check + error on issues)
+          ruff check src/ tests/ app.py --line-length=100
+          # Format check (don't modify, just verify)
+          ruff format src/ tests/ app.py --line-length=100 --check
 
       - name: Test with pytest
         run: |

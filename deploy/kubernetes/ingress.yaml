@@ -1,0 +1,27 @@
+# Feature #81: Kubernetes Deployment Manifests
+# Ingress for Project Atlas (optional — for production with domain)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: atlas
+  namespace: project-atlas
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - atlas.yourdomain.com
+    secretName: atlas-tls
+  rules:
+  - host: atlas.yourdomain.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: atlas
+            port:
+              name: http

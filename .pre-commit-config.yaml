@@ -1,11 +1,12 @@
-# Pre-commit hooks cho Personal AI Assistant
-# Install: pip install pre-commit && pre-commit install
+# Pre-commit hooks cho Personal AI Assistant (Project Atlas)
+# Install: pip install -r requirements.txt && pre-commit install
 # Run all:  pre-commit run --all-files
+# Update:   pre-commit autoupdate
 
 repos:
   # ── Basic hooks (built-in) ──
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
+    rev: v5.0.0
     hooks:
       - id: trailing-whitespace
         name: Trim trailing whitespace
@@ -28,37 +29,22 @@ repos:
       - id: debug-statements
         name: Check debug imports (pdb/ipdb)
 
-  # ── Python formatter ──
-  - repo: https://github.com/psf/black
-    rev: 24.4.2
+  # ── Ruff: linter + formatter + import sorter (replaces flake8 + black + isort) ──
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
     hooks:
-      - id: black
-        name: Format Python code (Black)
-        language_version: python3
+      # Linter — catch errors, enforce style
+      - id: ruff
+        name: Lint Python code (ruff)
         args: [--line-length=100]
-
-  # ── Python import sorter ──
-  - repo: https://github.com/PyCQA/isort
-    rev: 5.13.2
-    hooks:
-      - id: isort
-        name: Sort Python imports (isort)
-        args: [--profile=black, --line-length=100]
-
-  # ── Python linter ──
-  - repo: https://github.com/PyCQA/flake8
-    rev: 7.1.0
-    hooks:
-      - id: flake8
-        name: Lint Python code (flake8)
-        args:
-          - --max-line-length=100
-          - --max-complexity=10
-          - --extend-ignore=E203,W503
+      # Formatter — auto-format (replaces black)
+      - id: ruff-format
+        name: Format Python code (ruff format)
+        args: [--line-length=100]
 
   # ── Python type checker ──
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.10.0
+    rev: v1.11.2
     hooks:
       - id: mypy
         name: Type check Python code (mypy)
@@ -66,6 +52,16 @@ repos:
         additional_dependencies:
           - types-requests>=2.31.0
         exclude: ^tests/
+
+  # ── Run tests (local hook — requires pytest in the environment) ──
+  - repo: local
+    hooks:
+      - id: pytest
+        name: Run tests (pytest)
+        entry: python -m pytest tests/ -x --tb=short -q
+        language: system
+        pass_filenames: false
+        always_run: true
 
   # ── Security scan ──
   - repo: https://github.com/PyCQA/bandit

@@ -253,6 +253,261 @@ class TestGetContextText:
 
 
 # ============================================================
+# Message Editing & Deletion
+# ============================================================
+
+
+class TestGetMessageById:
+    def test_get_existing_message(self, memory):
+        """get_message_by_id should return a Message for an existing message."""
+        session_id = memory.create_session()
+        msg = memory.add_message(session_id, "user", "Hello!")
+        found = memory.get_message_by_id(session_id, msg.id)
+        assert found is not None
+        assert found.id == msg.id
+        assert found.content == "Hello!"
+        assert found.role == "user"
+
+    def test_get_nonexistent_message(self, memory):
+        """get_message_by_id should return None for non-existent message."""
+        session_id = memory.create_session()
+        found = memory.get_message_by_id(session_id, 999)
+        assert found is None
+
+    def test_get_message_wrong_session(self, memory):
+        """get_message_by_id should return None if message exists but in different session."""
+        s1 = memory.create_session()
+        s2 = memory.create_session()
+        msg = memory.add_message(s1, "user", "Hello")
+        found = memory.get_message_by_id(s2, msg.id)
+        assert found is None
+
+
+class TestUpdateMessage:
+    def test_update_content(self, memory):
+        """update_message should update the message content."""
+        session_id = memory.create_session()
+        msg = memory.add_message(session_id, "user", "Original content")
+        updated = memory.update_message(session_id, msg.id, "Updated content")
+        assert updated is not None
+        assert updated.content == "Updated content"
+        # Verify persistence
+        fetched = memory.get_message_by_id(session_id, msg.id)
+        assert fetched.content == "Updated content"
+
+    def test_update_not_found(self, memory):
+        """update_message on non-existent message should return None."""
+        session_id = memory.create_session()
+        result = memory.update_message(session_id, 999, "New content")
+        assert result is None
+
+    def test_update_empty_content_raises(self, memory):
+        """update_message with empty content should raise AssistantError."""
+        from src.core import AssistantError
+        session_id = memory.create_session()
+        msg = memory.add_message(session_id, "user", "Hello")
+        with pytest.raises(AssistantError, match="cannot be empty"):
+            memory.update_message(session_id, msg.id, "")
+        with pytest.raises(AssistantError, match="cannot be empty"):
+            memory.update_message(session_id, msg.id, "   ")
+
+    def test_update_does_not_change_message_count(self, memory):
+        """update_message should NOT increment message_count (editing, not adding)."""
+        session_id = memory.create_session()
+        memory.add_message(session_id, "user", "A")
+        memory.add_message(session_id, "assistant", "B")
+        msg = memory.add_message(session_id, "user", "C")
+        assert memory.get_session(session_id).message_count == 3
+        memory.update_message(session_id, msg.id, "Updated C")
+        assert memory.get_session(session_id).message_count == 3
+
+
+class TestDeleteMessage:
+    def test_delete_existing_message(self, memory):
+        """delete_message should remove the message and return it."""
+        session_id = memory.create_session()
+        msg = memory.add_message(session_id, "user", "Hello!")
+        deleted = memory.delete_message(session_id, msg.id)
+        assert deleted is not None
+        assert deleted.id == msg.id
+        assert deleted.content == "Hello!"
+        # Verify deletion
+        assert memory.get_message_by_id(session_id, msg.id) is None
+
+    def test_delete_not_found(self, memory):
+        """delete_message on non-existent message should return None."""
+        session_id = memory.create_session()
+        result = memory.delete_message(session_id, 999)
+        assert result is None
+
+    def test_delete_decrements_count(self, memory):
+        """delete_message should decrement session message_count."""
+        session_id = memory.create_session()
+        msg1 = memory.add_message(session_id, "user", "A")
+        msg2 = memory.add_message(session_id, "assistant", "B")
+        assert memory.get_session(session_id).message_count == 2
+        memory.delete_message(session_id, msg1.id)
+        assert memory.get_session(session_id).message_count == 1
+        memory.delete_message(session_id, msg2.id)
+        assert memory.get_session(session_id).message_count == 0
+
+    def test_delete_decrements_not_below_zero(self, memory):
+        """delete_message should not decrement message_count below 0."""
+        session_id = memory.create_session()
+        # message_count should be 0, try to delete non-existent
+        memory.delete_message(session_id, 999)
+        assert memory.get_session(session_id).message_count == 0
+
+    def test_delete_returns_correct_role(self, memory):
+        """delete_message should return the correct message with original role."""
+        session_id = memory.create_session()
+        memory.add_message(session_id, "user", "Hi")
+        msg2 = memory.add_message(session_id, "assistant", "Hello there")
+        deleted = memory.delete_message(session_id, msg2.id)
+        assert deleted.role == "assistant"
+        assert deleted.content == "Hello there"
+
+
+# ============================================================
+# Pinned Messages
+# ============================================================
+
+
+class TestPinMessage:
+    def test_pin_existing_message(self, memory):
+        """pin_message should set pinned=1 on a message."""
+        session_id = memory.create_session()
+        msg = memory.add_message(session_id, "user", "Important!")
+        pinned = memory.pin_message(session_id, msg.id)
+        assert pinned is not None
+        assert pinned.pinned == 1
+        # Verify persistence
+        fetched = memory.get_message_by_id(session_id, msg.id)
+        assert fetched.pinned == 1
+
+    def test_pin_nonexistent_message(self, memory):
+        """pin_message on non-existent message should return None."""
+        session_id = memory.create_session()
+        result = memory.pin_message(session_id, 999)
+        assert result is None
+
+    def test_pin_wrong_session(self, memory):
+        """pin_message should return None if message in different session."""
+        s1 = memory.create_session()
+        s2 = memory.create_session()
+        msg = memory.add_message(s1, "user", "Hello")
+        result = memory.pin_message(s2, msg.id)
+        assert result is None
+
+
+class TestUnpinMessage:
+    def test_unpin_existing_pinned_message(self, memory):
+        """unpin_message should set pinned=0."""
+        session_id = memory.create_session()
+        msg = memory.add_message(session_id, "assistant", "Important")
+        memory.pin_message(session_id, msg.id)
+        unpinned = memory.unpin_message(session_id, msg.id)
+        assert unpinned is not None
+        assert unpinned.pinned == 0
+        # Verify persistence
+        fetched = memory.get_message_by_id(session_id, msg.id)
+        assert fetched.pinned == 0
+
+    def test_unpin_non_pinned_message(self, memory):
+        """unpin_message should work on a message that isn't pinned."""
+        session_id = memory.create_session()
+        msg = memory.add_message(session_id, "user", "Hello")
+        unpinned = memory.unpin_message(session_id, msg.id)
+        assert unpinned is not None
+        assert unpinned.pinned == 0
+
+    def test_unpin_nonexistent_message(self, memory):
+        """unpin_message on non-existent message should return None."""
+        session_id = memory.create_session()
+        result = memory.unpin_message(session_id, 999)
+        assert result is None
+
+
+class TestGetPinnedMessages:
+    def test_get_pinned_messages_empty(self, memory):
+        """get_pinned_messages should return empty list when nothing pinned."""
+        session_id = memory.create_session()
+        pinned = memory.get_pinned_messages(session_id)
+        assert pinned == []
+
+    def test_get_pinned_messages_returns_pinned_only(self, memory):
+        """get_pinned_messages should only return pinned messages."""
+        session_id = memory.create_session()
+        msg1 = memory.add_message(session_id, "user", "Not pinned")
+        msg2 = memory.add_message(session_id, "user", "Pinned!")
+        msg3 = memory.add_message(session_id, "assistant", "Also pinned")
+        memory.pin_message(session_id, msg2.id)
+        memory.pin_message(session_id, msg3.id)
+
+        pinned = memory.get_pinned_messages(session_id)
+        assert len(pinned) == 2
+        assert pinned[0].id == msg2.id
+        assert pinned[1].id == msg3.id
+
+    def test_get_pinned_messages_ordered_by_id(self, memory):
+        """get_pinned_messages should return in insertion order (oldest first)."""
+        session_id = memory.create_session()
+        msg1 = memory.add_message(session_id, "user", "First")
+        msg2 = memory.add_message(session_id, "assistant", "Second")
+        msg3 = memory.add_message(session_id, "user", "Third")
+        # Pin out of order
+        memory.pin_message(session_id, msg3.id)
+        memory.pin_message(session_id, msg1.id)
+
+        pinned = memory.get_pinned_messages(session_id)
+        assert pinned[0].id == msg1.id  # Oldest first
+        assert pinned[1].id == msg3.id
+
+    def test_get_pinned_messages_after_unpin(self, memory):
+        """get_pinned_messages should exclude unpinned messages."""
+        session_id = memory.create_session()
+        msg1 = memory.add_message(session_id, "user", "Pin me")
+        msg2 = memory.add_message(session_id, "user", "And me")
+        memory.pin_message(session_id, msg1.id)
+        memory.pin_message(session_id, msg2.id)
+        assert len(memory.get_pinned_messages(session_id)) == 2
+
+        memory.unpin_message(session_id, msg1.id)
+        pinned = memory.get_pinned_messages(session_id)
+        assert len(pinned) == 1
+        assert pinned[0].id == msg2.id
+
+    def test_get_pinned_messages_other_session_unaffected(self, memory):
+        """Pinning in one session should not affect another."""
+        s1 = memory.create_session()
+        s2 = memory.create_session()
+        m1 = memory.add_message(s1, "user", "Important")
+        m2 = memory.add_message(s2, "user", "Not pinned")
+        memory.pin_message(s1, m1.id)
+
+        assert len(memory.get_pinned_messages(s1)) == 1
+        assert len(memory.get_pinned_messages(s2)) == 0
+
+
+class TestPinnedToDict:
+    def test_to_dict_includes_pinned(self, memory):
+        """Message.to_dict should include pinned field."""
+        session_id = memory.create_session()
+        msg = memory.add_message(session_id, "user", "Hello")
+        pinned = memory.pin_message(session_id, msg.id)
+        d = pinned.to_dict()
+        assert d.get("pinned") == 1
+
+    def test_to_dict_pinned_not_pinned(self, memory):
+        """Message.to_dict should show pinned=0 for non-pinned messages."""
+        from src.memory import Message
+        msg = Message(id=1, session_id="abc", role="user", content="Hello",
+                       created_at="2026-01-01T00:00:00Z")
+        d = msg.to_dict()
+        assert d.get("pinned") == 0
+
+
+# ============================================================
 # Edge Cases
 # ============================================================
 

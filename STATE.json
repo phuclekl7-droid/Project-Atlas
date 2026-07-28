@@ -1,16 +1,16 @@
 {
   "project": "Project Atlas",
-  "version": "v0.5.2-alpha",
+  "version": "v0.6.0-alpha",
   "repo": "phuclekl7-droid/Project-Atlas",
   "streamlit_url": "https://phuclekl7-droid-project-atlas.streamlit.app",
-  "progress_pct": 95,
+  "progress_pct": 99,
   "state": {
     "core": "implemented + tested",
     "settings": "implemented + tested",
     "model_router": "implemented + tested",
     "memory": "implemented + tested (fixed SQLite threading)",
     "plugin": "implemented + tested",
-    "workflow": "implemented + tested",
+    "workflow": "implemented + tested + async + streaming",
     "knowledge": "implemented + tested",
     "ui": "implemented (Streamlit + CLI)",
     "cli": "implemented",
@@ -54,10 +54,9 @@
     }
   },
   "next_goals": [
-    "Caching layer for knowledge search + model responses",
-    "Async model calls for smoother UI",
-    "Docker deployment (Dockerfile + docker-compose)",
-    "LangChain integration for advanced agents",
-    "Multi-modal support (image, audio)"
+    "Gemini Model Provider (settings defined but not implemented)",
+    "GitHub Release v0.6.0-beta",
+    "Multi-modal support (image, audio)",
+    "Integration tests for full async pipeline"
   ]
 }

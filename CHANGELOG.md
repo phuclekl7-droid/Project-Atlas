@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.6.0-alpha (Async Workflow + Python 3.11 Compat)
+
+**Release date:** 2026-07-27
+
+### 🆕 Async Workflow Processor
+- **`Workflow.process_async()`**: Full async pipeline — `Memory → Plugin → Model Router → Memory`
+  - Uses `ModelRouter.generate_async()` for non-blocking API calls (aiohttp cho Ollama/OpenAI)
+  - Plugin execution giữ sync (fast local operation), phần còn lại chạy async
+  - Giữ `process()` sync cho backward compatibility
+- **10 new tests** cho async pipeline (`TestWorkflowProcessAsync`, `TestWorkflowProcessStream`)
+  - Test LLM greeting, plugin routing, memory saving, empty input, stats tracking
+- **`pytest.ini`**: Thêm `asyncio_mode = auto` để hỗ trợ async tests
+
+### 🐛 Bug Fix
+- **Python 3.11 f-string compatibility**: Sửa nested quotes `f"{"... "}"` → `f"{'...'}"` trong `_call_model` và `_call_model_async` (Dockerfile dùng `python:3.11-slim`)
+
+### ✅ Verification
+- 28 workflow tests pass (18 sync + 5 async + 5 streaming)
+- Backward compatible: `process()` sync giữ nguyên, không thay đổi API
+
+---
+
 ## v0.5.2-alpha (Community + Deploy) — Push lên GitHub + Streamlit Cloud
 
 **Release date:** 2026-07-27

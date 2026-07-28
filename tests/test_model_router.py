@@ -109,10 +109,10 @@ class TestMockModel:
         assert "0" in response.text or "chào" in response.text
 
     def test_latency_value(self, mock_settings):
-        """MockModel response should include latency."""
+        """MockModel response should include latency (>= 0 for Windows low-res clock)."""
         model = MockModel(mock_settings)
         response = model.generate("test")
-        assert response.latency_ms > 0
+        assert response.latency_ms >= 0
 
     def test_repr(self, mock_settings):
         """__repr__ should include class name and model."""

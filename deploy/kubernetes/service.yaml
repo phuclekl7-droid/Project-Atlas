@@ -1,0 +1,20 @@
+# Feature #81: Kubernetes Deployment Manifests
+# Service for Project Atlas
+apiVersion: v1
+kind: Service
+metadata:
+  name: atlas
+  namespace: project-atlas
+  labels:
+    app: atlas
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8501
+    targetPort: 8501
+    name: http
+  - port: 8000
+    targetPort: 8000
+    name: health
+  selector:
+    app: atlas

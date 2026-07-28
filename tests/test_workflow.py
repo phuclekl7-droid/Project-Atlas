@@ -162,7 +162,7 @@ class TestWorkflowProcess:
         assert result.source == "llm"
         assert result.response is not None
         assert result.output_text != ""
-        assert result.latency_ms > 0
+        assert result.latency_ms >= 0
         assert result.session_id == session_id
 
     def test_process_llm_saves_to_memory(self, workflow, memory):
@@ -273,6 +273,122 @@ class TestWorkflowStats:
         stats = workflow.get_stats()
         assert stats["total_processed"] == 3
         assert stats["total_llm_calls"] == 2
+        assert stats["total_plugin_calls"] == 1
+
+
+# ============================================================
+# Async Workflow Processing (process_async)
+# ============================================================
+
+
+class TestWorkflowProcessAsync:
+    """Tests for the async process_async() method."""
+
+    async def test_process_async_llm_greeting(self, workflow, memory):
+        """A greeting should route to LLM via async path."""
+        session_id = memory.create_session()
+        result = await workflow.process_async("Hello!", session_id=session_id)
+
+        assert result.source == "llm"
+        assert result.response is not None
+        assert result.output_text != ""
+        assert result.latency_ms >= 0
+        assert result.session_id == session_id
+
+    async def test_process_async_saves_to_memory(self, workflow, memory):
+        """Async responses should be saved to memory."""
+        session_id = memory.create_session()
+        before = memory.count_messages(session_id)
+        await workflow.process_async("Hello!", session_id=session_id)
+        after = memory.count_messages(session_id)
+        assert after == before + 2
+
+    async def test_process_async_plugin_calculator(self, workflow, memory):
+        """A calculator input via async path should route to plugin."""
+        session_id = memory.create_session()
+        result = await workflow.process_async("2 + 3", session_id=session_id)
+
+        assert result.source == "plugin"
+        assert result.plugin_result is not None
+        assert result.plugin_result.success is True
+        assert "5" in result.plugin_result.output
+
+    async def test_process_async_empty_input_raises(self, workflow, memory):
+        """Empty input via async should raise AssistantError."""
+        session_id = memory.create_session()
+        with pytest.raises(AssistantError, match="cannot be empty"):
+            await workflow.process_async("", session_id=session_id)
+
+    async def test_process_async_stats_tracking(self, workflow, memory):
+        """Async calls should update stats correctly."""
+        session_id = memory.create_session()
+        await workflow.process_async("Hello!", session_id=session_id)
+        await workflow.process_async("2 + 3", session_id=session_id)
+
+        stats = workflow.get_stats()
+        assert stats["total_processed"] == 2
+        assert stats["total_llm_calls"] == 1
+        assert stats["total_plugin_calls"] == 1
+
+
+# ============================================================
+# Streaming (process_stream)
+# ============================================================
+
+
+class TestWorkflowProcessStream:
+    """Tests for the streaming process_stream() method."""
+
+    async def test_process_stream_llm(self, workflow, memory):
+        """Streaming should yield tokens from the LLM."""
+        session_id = memory.create_session()
+        tokens = []
+        async for token in workflow.process_stream("Hello!", session_id=session_id):
+            tokens.append(token)
+
+        full_text = "".join(tokens)
+        assert len(full_text) > 0
+        assert len(tokens) > 0  # Should have yielded multiple tokens (word-by-word for Mock)
+
+    async def test_process_stream_saves_to_memory(self, workflow, memory):
+        """Streaming responses should be saved to memory after completion."""
+        session_id = memory.create_session()
+        before = memory.count_messages(session_id)
+
+        async for _ in workflow.process_stream("Hello!", session_id=session_id):
+            pass
+
+        after = memory.count_messages(session_id)
+        assert after == before + 2
+
+    async def test_process_stream_plugin(self, workflow, memory):
+        """Calculator input via streaming should yield plugin output as single token."""
+        session_id = memory.create_session()
+        tokens = []
+        async for token in workflow.process_stream("2 + 3", session_id=session_id):
+            tokens.append(token)
+
+        full_text = "".join(tokens)
+        assert "5" in full_text
+
+    async def test_process_stream_empty_input_raises(self, workflow, memory):
+        """Empty input via stream should raise AssistantError."""
+        session_id = memory.create_session()
+        with pytest.raises(AssistantError, match="cannot be empty"):
+            async for _ in workflow.process_stream("", session_id=session_id):
+                pass
+
+    async def test_process_stream_stats_tracking(self, workflow, memory):
+        """Streaming should update stats correctly."""
+        session_id = memory.create_session()
+        async for _ in workflow.process_stream("Hello!", session_id=session_id):
+            pass
+        async for _ in workflow.process_stream("2 + 3", session_id=session_id):
+            pass
+
+        stats = workflow.get_stats()
+        assert stats["total_processed"] == 2
+        assert stats["total_llm_calls"] == 1
         assert stats["total_plugin_calls"] == 1
 
 

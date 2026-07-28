@@ -1,0 +1,9 @@
+# Feature #81: Kubernetes Deployment Manifests
+# Namespace for Project Atlas
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: project-atlas
+  labels:
+    app: atlas
+    environment: production
